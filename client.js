@@ -139,17 +139,22 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState('')
       const [msg, setMsg] = React.useState('')
       const [msgTone, setMsgTone] = React.useState('')
-      const [kws, setKws] = React.useState(null)
-      const [ws, setWs] = React.useState(null)
       const [rl, setRl] = React.useState(null)
       const [newVer, setNewVer] = React.useState('')       // 发现的新版本号（空 = 没发现）          // 日报形态：full / brief / off
       // ⚠️ 输入框必须绑"本地草稿"：页面每 5 秒轮询 /status，服务端那份会把 config 盖掉
       //    ⇒ 直接绑 cfg 的话，用户打字打到一半就被冲没了 ✗（2026-10-14 陌生人验收时抓到）
       const [perDay, setPerDay] = React.useState(null)
+      const [perScan, setPerScan] = React.useState(null)
       const [perRound, setPerRound] = React.useState(null)
-      const [replyPer, setReplyPer] = React.useState(null)
       const [dmUid, setDmUid] = React.useState(null)        // 私信收件人 UID（本地草稿）
       const [dmMode, setDmMode] = React.useState(null)      // 投递方式：off / only / both
+      const [subProvider, setSubProvider] = React.useState(null)   // 派子代理用的 provider
+      const [subModel, setSubModel] = React.useState(null)         // 派子代理用的 model
+      const [ownerName, setOwnerName] = React.useState(null)       // 称呼
+      const [scanPrompt, setScanPrompt] = React.useState(null)     // 子代理提示词
+      const [targetSession, setTargetSession] = React.useState(null) // 自动刷在哪个会话触发
+      const [sessions, setSessions] = React.useState(null)          // 会话列表（下拉用）
+      const [models, setModels] = React.useState(null)             // 可选 providers/models 列表（下拉用）
       const [mention, setMention] = React.useState(null)
       const [login, setLogin] = React.useState(null)
       const [runNote, setRunNote] = React.useState(null)
@@ -167,16 +172,31 @@ window.__ModuleLoader__.load({
 
       const cfg = st?.config
       React.useEffect(() => {
-        if (cfg && kws === null) setKws((cfg.keywords || []).join('\n'))
-        if (cfg && ws === null) setWs(cfg.workspace || '')
         if (cfg && rl === null) setRl(cfg.reportLevel || 'full')
         if (cfg && perDay === null) setPerDay(String(cfg.perDay ?? 5))
+        if (cfg && perScan === null) setPerScan(String(cfg.perScan ?? 1))
         if (cfg && perRound === null) setPerRound(String(cfg.commentPerRound ?? 1))
-        if (cfg && replyPer === null) setReplyPer(String(cfg.replyPerRound ?? 1))
         if (cfg && mention === null) setMention(cfg.mentionName || '')
         if (cfg && dmUid === null) setDmUid(cfg.dmUid ? String(cfg.dmUid) : '')
         if (cfg && dmMode === null) setDmMode(cfg.dmMode || 'off')
+        if (cfg && subProvider === null) setSubProvider(cfg.subProvider || 'apii')
+        if (cfg && subModel === null) setSubModel(cfg.subModel || 'deepseek-v4-pro')
+        if (cfg && ownerName === null) setOwnerName(cfg.ownerName || '小鱿鱼')
+        if (cfg && scanPrompt === null) setScanPrompt(cfg.scanPrompt || '')
+        if (cfg && targetSession === null) setTargetSession(cfg.targetSession || '')
       }, [cfg])
+
+      React.useEffect(() => {
+        let aliveM = true
+        jget('/models').then((d) => { if (aliveM && d?.providers) setModels(d.providers) }).catch(() => {})
+        return () => { aliveM = false }
+      }, [])
+
+      React.useEffect(() => {
+        let aliveS = true
+        jget('/sessions').then((d) => { if (aliveS && d?.sessions) setSessions(d.sessions) }).catch(() => {})
+        return () => { aliveS = false }
+      }, [])
 
       const win = { ...DEFAULT_WINDOWS, ...(st?.windows || {}) }
 
@@ -273,16 +293,6 @@ window.__ModuleLoader__.load({
         } catch (e) { say(String(e?.message ?? e), 'warn') } finally { setBusy('') }
       }
 
-      const onInstallAsr = async () => {
-        setBusy('asr')
-        say('')
-        try {
-          const r = await jpost('/install-asr', {})
-          say(r?.started ? '开始装转写依赖 —— 进度显示在下面（要下模型，慢一点正常）' : (r?.hint || '没起来'),
-            r?.started ? 'good' : 'warn')
-        } catch (e) { say(String(e?.message ?? e), 'warn') } finally { setBusy('') }
-      }
-
       const onInstall = async () => {
         setBusy('install')
         say('')
@@ -295,9 +305,11 @@ window.__ModuleLoader__.load({
 
       const onRun = async () => {
         setBusy('run')
+        say('去那个会话里叫它刷了，稍等…', '')
         try {
           const r = await jpost('/run', {})
-          say(r?.started ? '已经在后台跑一轮了，报告会写在 out/ 里' : '没起来，看 duty.log', r?.started ? 'good' : 'warn')
+          if (r?.ok && r.started) say('已经在选定的会话里叫它去刷了 —— 切过去看它的回复就好', 'good')
+          else say(r?.error || '没起来，看 duty.log', 'warn')
         } catch (e) { say(String(e?.message ?? e), 'warn') }
         finally { setBusy('') }
       }
@@ -341,11 +353,6 @@ window.__ModuleLoader__.load({
         finally { setBusy('') }
       }
 
-      const onSaveText = async () => {
-        const list = String(kws || '').split('\n').map((s) => s.trim()).filter(Boolean)
-        await patch({ keywords: list, workspace: String(ws || '').trim() }, '关键词与工作区')
-      }
-
       if (!cfg) {
         return h('div', { 'data-bd-page': '' }, h('div', { 'data-bd-note': '' }, '读设置中…'))
       }
@@ -365,15 +372,6 @@ window.__ModuleLoader__.load({
           runNote ? h('div', { 'data-bd-msg': '', 'data-good': runNote.tone === 'good' ? '' : undefined,
             'data-warn': runNote.tone === 'warn' ? '' : undefined }, runNote.t) : null,
 
-        /* ── 设置没同步到 DSH 那边时，明说出来（别再假装保存成功）──
-           2026-10-18：DSH 0.2.1 某些启动方式会拒写（profile reload requires the root Include entry），
-           以前的表现是"开关亮一下又被压回原状"，用户以为是自己手滑。 */
-        (Array.isArray(st.notSynced) && st.notSynced.length)
-          ? h('div', { 'data-bd-msg': '', 'data-warn': '' },
-              `提示：有 ${st.notSynced.length} 项没能同步到 DSH 原生设置（${st.notSynced.join('、')}）。`
-              + '插件会以这里的设置为准，功能照常；只是 DSH 自带的那页看不到这些值。')
-          : null,
-
         /* ── 定时 ── */
         h('div', { 'data-bd-sec': '' },
           h('div', { 'data-bd-h': '' }, '什么时候自己跑'),
@@ -392,6 +390,64 @@ window.__ModuleLoader__.load({
               onChange: (v) => patch({ [k]: v }, win[k].label),
             }))) : null),
 
+        /* ── 派子代理刷的模型 ── */
+        h('div', { 'data-bd-sec': '' },
+          h('div', { 'data-bd-h': '' }, '派子代理刷的模型'),
+          h('div', { 'data-bd-row': '' },
+            h('div', { 'data-bd-grow': '' },
+              h('div', { 'data-bd-label': '' }, 'provider（模型厂商）'),
+              h('select', {
+                'data-bd-input': '', value: subProvider ?? '',
+                onChange: (e) => {
+                  const v = e.target.value
+                  setSubProvider(v)
+                  const first = ((models || []).find((p) => p.id === v)?.models || [])[0]?.id || ''
+                  setSubModel(first)
+                  patch({ subProvider: v, subModel: first }, '子代理 provider')
+                },
+              },
+                ...((models || []).map((p) => h('option', { value: p.id }, (p.name || p.id) + '（' + p.id + '）')))))),
+          h('div', { 'data-bd-row': '' },
+            h('div', { 'data-bd-grow': '' },
+              h('div', { 'data-bd-label': '' }, 'model（模型名）'),
+              h('select', {
+                'data-bd-input': '', value: subModel ?? '',
+                onChange: (e) => { const v = e.target.value; setSubModel(v); patch({ subModel: v }, '子代理 model') },
+              },
+                ...((((models || []).find((p) => p.id === subProvider) || {}).models || []).map((m) => h('option', { value: m.id }, (m.name || m.id) + '（' + m.id + '）')))))),
+        ),
+
+        /* ── 自动刷在哪个会话 ── */
+        h('div', { 'data-bd-sec': '' },
+          h('div', { 'data-bd-h': '' }, '自动刷在哪个会话'),
+          h('div', { 'data-bd-note': '' }, '谷时自动刷的时候，去哪个会话里叫大肥鱼。选你跟她平时聊天的那个就好。'),
+          h('select', {
+            'data-bd-input': '', value: targetSession ?? '',
+            onChange: (e) => { const v = e.target.value; setTargetSession(v); patch({ targetSession: v }, '自动刷会话') },
+          },
+            h('option', { value: '' }, '（不选 = 自动挑最近聊过的）'),
+            ...((sessions || []).map((s) => h('option', { value: s.id }, s.title + '（' + s.id.slice(0, 14) + '…）'))))),
+
+        /* ── 提示词（可改） ── */
+        h('div', { 'data-bd-sec': '' },
+          h('div', { 'data-bd-h': '' }, '提示词（可改）'),
+          h('div', { 'data-bd-note': '' }, '称呼 + 子代理提示词。改了「称呼」，所有提示里的「小鱿鱼」都跟着变。'),
+          h('div', { 'data-bd-row': '' },
+            h('div', { 'data-bd-grow': '' },
+              h('div', { 'data-bd-label': '' }, '称呼'),
+              h('input', {
+                'data-bd-input': '', value: ownerName ?? '',
+                placeholder: '小鱿鱼',
+                onChange: (e) => setOwnerName(e.target.value),
+                onBlur: () => patch({ ownerName: String(ownerName || '').trim() || '小鱿鱼' }, '称呼'),
+              }))),
+          h('div', { 'data-bd-label': '' }, '子代理提示词（占位符 {owner}=称呼、{direction}=方向、{n}=条数）'),
+          h('textarea', {
+            'data-bd-input': '', rows: 8,
+            value: scanPrompt ?? '',
+            onChange: (e) => setScanPrompt(e.target.value),
+            onBlur: () => patch({ scanPrompt: String(scanPrompt || '') }, '子代理提示词'),
+          })),
         /* ── 一轮挑几条 ── */
         h('div', { 'data-bd-sec': '' },
           h('div', { 'data-bd-h': '' }, '一轮挑几条'),
@@ -405,28 +461,21 @@ window.__ModuleLoader__.load({
               onChange: (e) => setPerDay(e.target.value),
               onBlur: () => { const n = Math.max(0, Math.min(Number(perDay) || 0, 50)); setPerDay(String(n)); patch({ perDay: n }, '每天挑几条') },
             })),
+          h('div', { 'data-bd-row': '' },
+            h('div', { 'data-bd-grow': '' },
+              h('div', { 'data-bd-label': '' }, '每次最多挑几条'),
+              h('div', { 'data-bd-note': '' }, '派一次（手动说"帮我刷"也按这个）最多挑几条；默认 1 条最精')),
+            h('input', {
+              'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 1, max: 10,
+              value: perScan ?? '',
+              onChange: (e) => setPerScan(e.target.value),
+              onBlur: () => { const n = Math.max(1, Math.min(Number(perScan) || 1, 10)); setPerScan(String(n)); patch({ perScan: n }, '每次挑几条') },
+            })),
           st.lastRunAt ? h('div', { 'data-bd-note': '' }, `上次跑：${new Date(st.lastRunAt).toLocaleString('zh-CN')}`) : null),
 
         /* ── 发言与转写 ── */
         h('div', { 'data-bd-sec': '' },
           h('div', { 'data-bd-h': '' }, '它会不会替你说话'),
-          h(ToggleRow, {
-            label: '回复评论（只回楼中楼）',
-            note: '默认关；开了之后它只回「直接回复到你那条评论下面的人」，不参与讨论',
-            on: sw('replyToComments'),
-            onChange: (v) => patch({ replyToComments: v }, '回复评论'),
-          }),
-          sw('replyToComments') ? h('div', { 'data-bd-sub': '' },
-            h('div', { 'data-bd-row': '' },
-              h('div', { 'data-bd-grow': '' },
-                h('div', { 'data-bd-label': '' }, '每轮最多回几条'),
-                h('div', { 'data-bd-note': '' }, '只回直接回在你那条评论下面的人')),
-              h('input', {
-                'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 1, max: 10,
-                value: replyPer ?? '',
-                onChange: (e) => setReplyPer(e.target.value),
-                onBlur: () => { const n = Math.max(1, Math.min(Number(replyPer) || 1, 10)); setReplyPer(String(n)); patch({ replyPerRound: n }, '每轮几条回复') },
-              }))) : null,
           h(ToggleRow, {
             label: '自动评论并 @ 你',
             note: '默认关；开了之后它会在挑中的视频下面留评论，并 @ 你填的那个人',
@@ -470,56 +519,18 @@ window.__ModuleLoader__.load({
               onBlur: () => { const n = Math.max(0, Number(dmUid) || 0); setDmUid(n ? String(n) : ''); patch({ dmUid: n }, '私信收件人') },
             }),
             h('div', { 'data-bd-note': '' }, '私信内容 = 本轮每条的「标题 + 链接 + 一句话」，一轮合并成一条发（不受 150 字限制）'),
-            h('div', { 'data-bd-note': '' }, '⚠️ 建议先让这个号和收件人互关：B站 对「陌生人私信」会限流，还可能不弹提醒')) : null,
-          h(ToggleRow, {
-            label: '本地转写没字幕的视频',
-            note: '默认关；开了以后，没字幕的视频会在本机转写一遍（不花 API 钱）',
-            on: sw('transcribe'),
-            onChange: (v) => patch({ transcribe: v }, '本地转写'),
-          }),
-          sw('transcribe') ? h('div', { 'data-bd-sub': '' },
-            h('div', { 'data-bd-row': '' },
-              h('button', { 'data-bd-btn': '', disabled: busy === 'asr', onClick: onInstallAsr },
-                st.asrReady ? '重装转写依赖' : '装转写依赖'),
-              h('div', { 'data-bd-note': '' },
-                !st.asrReady ? '还没装 —— 现在开着也没用：没字幕的视频会被跳过（报告里会写"因无字幕跳过 N 条"）'
-                  : (st.asrModelReady ? '环境和模型都好了' : '环境好了；模型会在第一次转写时自动下（几百 MB）'))),
-            h('div', { 'data-bd-note': '' },
-              '点一下就好：建一个独立环境、装 faster-whisper + yt-dlp，并把 Whisper 模型也下好',
-              h('br'),
-              '（模型默认 small，几百 MB，走国内镜像；装一次就够了）'),
-            st.asrTail ? h('div', null,
-              h('div', { 'data-bd-note': '' }, st.asrInstalling ? '正在装转写依赖（进度）：' : '转写依赖的日志（末尾）—— 只有「没字幕的视频」用得到它：'),
-              h('pre', { 'data-bd-pre': '' }, st.asrTail)) : null) : null),
+            h('div', { 'data-bd-note': '' }, '⚠️ 建议先让这个号和收件人互关：B站 对「陌生人私信」会限流，还可能不弹提醒')) : null),
 
-        /* ── 关注什么 / 在哪儿刷 ── */
+        /* ── 日报写多细 ── */
         h('div', { 'data-bd-sec': '' },
-          h('div', { 'data-bd-h': '' }, '关注什么'),
-          h('textarea', {
-            'data-bd-input': '', rows: 5, placeholder: '一行一个关键词；留空用内置那几组',
-            value: kws ?? '', onChange: (e) => setKws(e.target.value),
-          }),
-          h('div', { 'data-bd-label': '' }, '工作区（它按这里的 AGENTS.md 认设定）'),
-          h('input', {
-            'data-bd-input': '', value: ws ?? '',
-            placeholder: '填你自己的工作区路径（留空 = 不读人设，按中性说话）',
-            onChange: (e) => setWs(e.target.value),
-          }),
-          h('div', { 'data-bd-note': '' },
-            '⭐ 想让它按你的设定说话，这里要填你自己平时用的那个工作区（放 AGENTS.md 的那个目录）；',
-            h('br'),
-            '留空不等于"用你的工作区" —— 那是不读设定、按中性说话（以前会去猜 dsh 进程自己的目录，容易读错人设）。'),
-          h('div', { 'data-bd-label': '' }, '日报写多细'),
+          h('div', { 'data-bd-h': '' }, '日报写多细'),
           h('select', {
             'data-bd-input': '', value: rl ?? 'full',
             onChange: (e) => { setRl(e.target.value); patch({ reportLevel: e.target.value }, '日报形态') },
           },
             h('option', { value: 'full' }, '完整 —— 每条：标题 / UP / 为什么值得（默认）'),
             h('option', { value: 'brief' }, '薄 —— 每条一两行，只留值不值得 + 链接'),
-            h('option', { value: 'off' }, '不写 —— 只发评论，不生成日报文件')),
-          h('div', { 'data-bd-row': '' },
-            h('button', { 'data-bd-btn': '', 'data-primary': '', disabled: Boolean(busy), onClick: onSaveText }, '保存'),
-            msg ? h('div', { 'data-bd-msg': '', 'data-good': msgTone === 'good' ? '' : undefined, 'data-warn': msgTone === 'warn' ? '' : undefined }, msg) : null)),
+            h('option', { value: 'off' }, '不写 —— 只发评论，不生成日报文件'))),
 
         /* ── 环境与账号 ── */
         h('div', { 'data-bd-sec': '' },
@@ -528,8 +539,6 @@ window.__ModuleLoader__.load({
             h('button', { 'data-bd-btn': '', disabled: busy === 'install', onClick: onInstall },
               st.venvReady ? '重装主依赖' : '装主依赖（建 venv）'),
             h('button', { 'data-bd-btn': '', disabled: busy === 'check', onClick: onCheck }, '测一下'),
-            h('button', { 'data-bd-btn': '', disabled: busy === 'update', onClick: onCheckUpdate }, '检查更新'),
-            newVer ? h('button', { 'data-bd-btn': '', 'data-primary': '', disabled: busy === 'upgrade', onClick: onUpgrade }, '一键升级到 v' + newVer) : null,
             h('button', { 'data-bd-btn': '', disabled: busy === 'login', onClick: onLoginStart }, '扫码登录'),
             h('div', { 'data-bd-note': '' },
               !st.venvReady ? (st.installFailed ? '上次没装成 → 看下面日志' : '还没装 → 先点「装主依赖」')
