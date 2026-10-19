@@ -478,7 +478,9 @@ export function apply(ctx, config) {
       //    子代理根本看不到 —— 比在提示词里嘱咐它"别选低播放量的"可靠得多。
       if (!filtering) return raw
       try {
-        const obj = JSON.parse(raw)
+        // ⚠️ mcp.call() **已经 JSON.parse 过**了，这里拿到的是对象；再 parse 一次会抛，
+        //    然后被下面的 catch 吞掉 ⇒ 门槛看起来"完全没生效"（2026-10-20 真踩到，别删这段注释）
+        const obj = typeof raw === 'string' ? JSON.parse(raw) : raw
         if (!obj || !Array.isArray(obj.videos)) return raw
         const nowSec = Date.now() / 1000
         const kept = []
@@ -497,8 +499,10 @@ export function apply(ctx, config) {
         obj.filtered = note.join('；')
         // 留一行日志：以后"门槛有没有生效"直接在 duty.log 里看得见，不用再猜
         try { log('搜索门槛生效：' + (obj.filtered || '无') + '（返回 ' + obj.count + ' 条）') } catch (e) {}
-        return JSON.stringify(obj)
+        return obj
       } catch (e) {
+        // 过滤失败绝不静默：退回不过滤，但日志里必须留痕
+        try { log('门槛过滤失败（已退回不过滤）：' + (e?.message ?? e)) } catch (e2) {}
         return raw
       }
     },
