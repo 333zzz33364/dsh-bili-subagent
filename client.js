@@ -367,7 +367,7 @@ window.__ModuleLoader__.load({
 
         /* ── 今天 ── */
         h('div', { 'data-bd-row': '' },
-          h('span', { 'data-bd-badge': '' }, `今天已挑 ${st.pickedToday ?? st.ranToday ?? 0} / ${cfg.perDay} 条`),
+          h('span', { 'data-bd-badge': '' }, `今天已自动刷 ${st.autoRoundsToday ?? 0} / ${cfg.perDay} 轮`),
           h('span', { 'data-bd-badge': '' }, '环境' + (st.venvReady ? '已就绪' : (st.installing ? '正在装' : '未装'))),
           h('span', { 'data-bd-badge': '' }, st.loggedIn ? 'B站已登录' : 'B站未登录'),
             h('span', { 'data-bd-badge': '' }, 'v' + (st.version || '?')),
@@ -457,8 +457,8 @@ window.__ModuleLoader__.load({
           h('div', { 'data-bd-h': '' }, '一轮挑几条'),
           h('div', { 'data-bd-row': '' },
             h('div', { 'data-bd-grow': '' },
-              h('div', { 'data-bd-label': '' }, '每天最多挑几条'),
-              h('div', { 'data-bd-note': '' }, '填 0 = 不自动刷（还是能手动跑）')),
+              h('div', { 'data-bd-label': '' }, '每天最多自动刷几轮'),
+              h('div', { 'data-bd-note': '' }, '填 0 = 不自动刷（手动跑不占额度）')),
             h('input', {
               'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 0, max: 50,
               value: perDay ?? '',

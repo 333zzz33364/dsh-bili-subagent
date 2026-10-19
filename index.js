@@ -595,8 +595,10 @@ export function apply(ctx, config) {
       return {
         ok: true,
         today: dayKey(now),
-        ranToday: st.day === dayKey(now) ? Number(st.count || 0) : 0,
-        pickedToday: countPickedToday(now),
+        // ⭐ 额度只有一个口径：**今天自动刷了几轮**（手动跑不占额度）
+        autoRoundsToday: countPickedToday(now),
+        autoRoundsLeft: Math.max(0, Number(cfg.perDay || 0) - countPickedToday(now)),
+        videosToday: countPicks(reportFileOf(now)),   // 今天报告里真挑到几条（含手动轮的）
         perDay: cfg.perDay,
         windows: Object.fromEntries(Object.entries(WINDOWS).map(([k, w]) => [k, {
           label: w.label, start: w.start, end: w.end,
@@ -845,7 +847,9 @@ export function apply(ctx, config) {
         if (!inWindow(now, WINDOWS[k])) continue
         const key = `${today}:${k}`
         if (st.windows?.[key]) continue
-        bumpState({ windows: { ...(st.windows || {}), [key]: true }, count: roundsToday(now) + 1, picked: countPickedToday(now) + 1, lastRunAt: now.toISOString(), lastWhy: k })
+        // ⭐ count 和 picked 历史上会不同步（旧版本遗留）⇒ 统一成一个口径：都记「自动刷了几轮」
+        const rounds = countPickedToday(now) + 1
+        bumpState({ windows: { ...(st.windows || {}), [key]: true }, count: rounds, picked: rounds, lastRunAt: now.toISOString(), lastWhy: k })
         triggerFeiyuScan(`window:${k}`)
         return
       }
@@ -1060,8 +1064,10 @@ export function apply(ctx, config) {
       config: cfg,
       windows: WINDOWS,
       today,
-      ranToday: st.day === today ? Number(st.count || 0) : 0,   // 今天跑了几轮
-      pickedToday: countPickedToday(),                          // 今天挑到几条（从报告里数）
+      // ⭐ 额度只有一个口径：**今天自动刷了几轮**（手动跑不占额度）
+      autoRoundsToday: countPickedToday(),
+      autoRoundsLeft: Math.max(0, Number(cfg.perDay || 0) - countPickedToday()),
+      videosToday: countPicks(reportFileOf()),   // 今天报告里真挑到几条（含手动轮的）
       lastRunAt: st.lastRunAt || null,
       lastWhy: st.lastWhy || null,
       loggedIn: hasCredential(),
