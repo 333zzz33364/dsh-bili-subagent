@@ -301,6 +301,8 @@ async def bili_search(keyword: str, num: int = 10, order: str = "totalrank") -> 
             "review": item.get("review", 0),
             "danmaku": item.get("video_review", 0),
             "duration": item.get("duration", ""),
+            # ⭐ 发布时间（unix 秒）：宿主拿它做「至少发布 N 天」的硬门槛（2026-10-19 加）
+            "pubdate": item.get("pubdate", 0),
             "description": item.get("description", "")[:200],
         })
 

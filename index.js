@@ -86,6 +86,10 @@ export const Config = !z ? undefined : z.object({
   ownerName: z.string().default('小鱿鱼').extra('volatile', true),
   /** ⭐ 子代理的人设+流程提示词（占位符 {owner}/{direction}/{n}） */
   scanPrompt: z.string().default(SCAN_PROMPT_TMPL).extra('volatile', true),
+  /** ⭐ 门槛：播放量低于这个数的直接不返回给子代理（0 = 不过滤） */
+  minViews: z.natural().default(0).extra('volatile', true),
+  /** ⭐ 门槛：发布不足这么多天的直接不返回给子代理（0 = 不过滤） */
+  minAgeDays: z.natural().default(0).extra('volatile', true),
 })
 
 /**
@@ -164,6 +168,8 @@ export function apply(ctx, config) {
     targetSession: '',
     ownerName: '小鱿鱼',
     scanPrompt: SCAN_PROMPT_TMPL,
+    minViews: 0,      // 播放量低于这个数的不给子代理看（0 = 不过滤）
+    minAgeDays: 0,    // 发布不足这么多天的不给子代理看（0 = 不过滤）
   }
   const normalize = (src, base) => {
     const out = { ...base }
@@ -195,6 +201,8 @@ export function apply(ctx, config) {
     if ('perDay' in p) p.perDay = Math.max(0, Math.min(Number(p.perDay) || 0, 50))
     if ('reportLevel' in p) p.reportLevel = ['full', 'brief', 'off'].includes(String(p.reportLevel)) ? String(p.reportLevel) : 'full'
     if ('commentPerRound' in p) p.commentPerRound = Math.max(0, Math.min(Number(p.commentPerRound) || 0, 20))
+    if ('minViews' in p) p.minViews = Math.max(0, Math.min(Number(p.minViews) || 0, 100000000))
+    if ('minAgeDays' in p) p.minAgeDays = Math.max(0, Math.min(Number(p.minAgeDays) || 0, 365))
     return p
   }
 
@@ -452,11 +460,42 @@ export function apply(ctx, config) {
       order: { type: 'string', description: 'totalrank=综合（默认）/ click=播放 / pubdate=最新 / dm=弹幕' },
     },
     async execute(args) {
-      return call('bili_search', {
+      refreshCfg()
+      const num = Math.max(1, Math.min(Number(args.num) || 10, 50))
+      const minViews = Math.max(0, Number(cfg.minViews || 0))
+      const minAgeDays = Math.max(0, Number(cfg.minAgeDays || 0))
+      const filtering = Boolean(minViews || minAgeDays)
+      // ⭐ 有门槛时多抓几倍再筛：不然筛完可能一条不剩，子代理会以为"搜不到"
+      const raw = await call('bili_search', {
         keyword: String(args.keyword ?? ''),
-        num: Math.max(1, Math.min(Number(args.num) || 10, 50)),
+        num: filtering ? Math.min(50, num * 4) : num,
         order: String(args.order || 'totalrank'),
       })
+      // ⭐ 硬门槛（设置页里的「最低播放量」「至少发布几天」）：在**工具层**就把垃圾滤掉，
+      //    子代理根本看不到 —— 比在提示词里嘱咐它"别选低播放量的"可靠得多。
+      if (!filtering) return raw
+      try {
+        const obj = JSON.parse(raw)
+        if (!obj || !Array.isArray(obj.videos)) return raw
+        const nowSec = Date.now() / 1000
+        const kept = []
+        let dropViews = 0
+        let dropAge = 0
+        for (const v of obj.videos) {
+          if (minViews && Number(v.play || 0) < minViews) { dropViews++; continue }
+          if (minAgeDays && Number(v.pubdate || 0) > nowSec - minAgeDays * 86400) { dropAge++; continue }
+          kept.push(v)
+        }
+        const note = []
+        if (minViews) note.push('播放量 < ' + minViews + ' 的排除 ' + dropViews + ' 条')
+        if (minAgeDays) note.push('发布不足 ' + minAgeDays + ' 天的排除 ' + dropAge + ' 条')
+        obj.videos = kept.slice(0, num)
+        obj.count = obj.videos.length
+        obj.filtered = note.join('；')
+        return JSON.stringify(obj)
+      } catch (e) {
+        return raw
+      }
     },
   })
 

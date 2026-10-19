@@ -153,6 +153,8 @@ window.__ModuleLoader__.load({
       const [ownerName, setOwnerName] = React.useState(null)       // 称呼
       const [scanPrompt, setScanPrompt] = React.useState(null)     // 子代理提示词
       const [targetSession, setTargetSession] = React.useState(null) // 自动刷在哪个会话触发
+      const [minViews, setMinViews] = React.useState(null)           // 门槛：最低播放量（0 = 不过滤）
+      const [minAgeDays, setMinAgeDays] = React.useState(null)       // 门槛：至少发布几天（0 = 不过滤）
       const [sessions, setSessions] = React.useState(null)          // 会话列表（下拉用）
       const [models, setModels] = React.useState(null)             // 可选 providers/models 列表（下拉用）
       const [mention, setMention] = React.useState(null)
@@ -184,6 +186,8 @@ window.__ModuleLoader__.load({
         if (cfg && ownerName === null) setOwnerName(cfg.ownerName || '小鱿鱼')
         if (cfg && scanPrompt === null) setScanPrompt(cfg.scanPrompt || '')
         if (cfg && targetSession === null) setTargetSession(cfg.targetSession || '')
+        if (cfg && minViews === null) setMinViews(String(cfg.minViews ?? 0))
+        if (cfg && minAgeDays === null) setMinAgeDays(String(cfg.minAgeDays ?? 0))
       }, [cfg])
 
       React.useEffect(() => {
@@ -472,6 +476,31 @@ window.__ModuleLoader__.load({
               onBlur: () => { const n = Math.max(1, Math.min(Number(perScan) || 1, 10)); setPerScan(String(n)); patch({ perScan: n }, '每次挑几条') },
             })),
           st.lastRunAt ? h('div', { 'data-bd-note': '' }, `上次跑：${new Date(st.lastRunAt).toLocaleString('zh-CN')}`) : null),
+
+        /* ── 挑什么样的（硬门槛） ── */
+        h('div', { 'data-bd-sec': '' },
+          h('div', { 'data-bd-h': '' }, '挑什么样的'),
+          h('div', { 'data-bd-note': '' }, '这两道是硬门槛：不达标的视频，子代理根本看不到 —— 在搜索那一步就滤掉了，不是靠它自觉。留 0 = 不过滤。'),
+          h('div', { 'data-bd-row': '' },
+            h('div', { 'data-bd-grow': '' },
+              h('div', { 'data-bd-label': '' }, '最低播放量'),
+              h('div', { 'data-bd-note': '' }, '比如填 10000：播放没过万的直接不返回给子代理')),
+            h('input', {
+              'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 0, step: 1000,
+              value: minViews ?? '',
+              onChange: (e) => setMinViews(e.target.value),
+              onBlur: () => { const n = Math.max(0, Math.min(Number(minViews) || 0, 100000000)); setMinViews(String(n)); patch({ minViews: n }, '最低播放量') },
+            })),
+          h('div', { 'data-bd-row': '' },
+            h('div', { 'data-bd-grow': '' },
+              h('div', { 'data-bd-label': '' }, '至少发布几天'),
+              h('div', { 'data-bd-note': '' }, '比如填 2：两天内刚发的先不推（刚上传、还没被验证的不急着当宝）')),
+            h('input', {
+              'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 0, max: 365,
+              value: minAgeDays ?? '',
+              onChange: (e) => setMinAgeDays(e.target.value),
+              onBlur: () => { const n = Math.max(0, Math.min(Number(minAgeDays) || 0, 365)); setMinAgeDays(String(n)); patch({ minAgeDays: n }, '至少发布几天') },
+            }))),
 
         /* ── 发言与转写 ── */
         h('div', { 'data-bd-sec': '' },
