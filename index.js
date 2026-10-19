@@ -51,6 +51,8 @@ const SCAN_PROMPT_TMPL = '你去 B 站帮我转一圈，看看有什么值得看
 export const Config = !z ? undefined : z.object({
   /** 定量刷：每天最多挑几条 */
   perDay: z.natural().default(5).extra('volatile', true),
+  /** ⭐ 两轮自动刷之间至少隔几小时（谷时窗口里按这个节奏轮转，直到额度用完） */
+  gapHours: z.natural().default(3).extra('volatile', true),
   /** 峰谷自动刷（总开关） */
   peakValley: z.boolean().default(false).extra('volatile', true),
   /** 峰谷子开关：中午 / 晚上 */
@@ -160,7 +162,7 @@ export function apply(ctx, config) {
    *     ② **定时器回调里绝不让异常外冒**（见 tick）—— 未捕获异常会杀掉整个宿主进程。
    */
   const DEFAULTS = {
-    perDay: 5, peakValley: false, noon: true, night: true, autoComment: false,
+    perDay: 5, gapHours: 3, peakValley: false, noon: true, night: true, autoComment: false,
     dmMode: 'off', dmUid: 0,
     keywords: [], commentPerRound: 1, mentionName: '', pythonPath: 'python', reportLevel: 'full',
     subProvider: 'apii', subModel: 'deepseek-v4-pro',
@@ -199,6 +201,7 @@ export function apply(ctx, config) {
   const clampPatch = (patch) => {
     const p = { ...patch }
     if ('perDay' in p) p.perDay = Math.max(0, Math.min(Number(p.perDay) || 0, 50))
+    if ('gapHours' in p) p.gapHours = Math.max(1, Math.min(Number(p.gapHours) || 3, 12))
     if ('reportLevel' in p) p.reportLevel = ['full', 'brief', 'off'].includes(String(p.reportLevel)) ? String(p.reportLevel) : 'full'
     if ('commentPerRound' in p) p.commentPerRound = Math.max(0, Math.min(Number(p.commentPerRound) || 0, 20))
     if ('minViews' in p) p.minViews = Math.max(0, Math.min(Number(p.minViews) || 0, 100000000))
@@ -831,6 +834,11 @@ export function apply(ctx, config) {
     }
   }
 
+  // ⭐ 谷时定时器：每 60 秒看一次，满足四件事才跑
+  //    ① 总开关开着 ② 今天自动刷的轮数没到上限 ③ 现在落在某个谷时窗口里
+  //    ④ 离上一轮已经隔够「两轮之间至少隔几小时」
+  //    ★ 2026-10-19 改：原来「每个窗口每天只跑一次」（windows[key] 打勾）⇒ 一天最多 3 轮，
+  //      perDay 填 5 永远用不满。现在改成**窗口内按间隔轮转**，直到额度用完。
   const tick = () => {
     try {
       refreshCfg()                    // ⭐ 定时器活得比设置页久：每一跳都重新读一遍配置
@@ -838,19 +846,28 @@ export function apply(ctx, config) {
       const now = new Date()
       const st = readJson(dutyStateFile, {})
       const today = dayKey(now)
-      // ⭐ 闸门看的是「今天已经**挑到几条**」（从今天的报告里数出来），不是「跑了几轮」
-      if (countPickedToday(now) >= Number(cfg.perDay || 0)) return
-      // ⭐ 「不写日报」那档没有报告可数 ⇒ 数不出条数就保守一点：一天只跑一轮
-      if (String(cfg.reportLevel || 'full') === 'off' && roundsToday(now) >= 1) return
+      const used = countPickedToday(now)
+      if (used >= Number(cfg.perDay || 0)) return
+      // ⭐ 两轮之间至少隔这么久（手动跑不受这个限制）
+      const gapMs = Math.max(1, Number(cfg.gapHours || 3)) * 3600_000
+      const lastAt = Date.parse(String(st.lastRunAt || '')) || 0
+      if (lastAt && now.getTime() - lastAt < gapMs) return
       for (const k of ['noon', 'night']) {
         if (!cfg[k]) continue
         if (!inWindow(now, WINDOWS[k])) continue
         const key = `${today}:${k}`
-        if (st.windows?.[key]) continue
-        // ⭐ count 和 picked 历史上会不同步（旧版本遗留）⇒ 统一成一个口径：都记「自动刷了几轮」
-        const rounds = countPickedToday(now) + 1
+        const rounds = used + 1
+        const before = { windows: st.windows || {}, count: st.count || 0, picked: st.picked || 0, lastRunAt: st.lastRunAt || null, lastWhy: st.lastWhy || null }
         bumpState({ windows: { ...(st.windows || {}), [key]: true }, count: rounds, picked: rounds, lastRunAt: now.toISOString(), lastWhy: k })
-        triggerFeiyuScan(`window:${k}`)
+        Promise.resolve(triggerFeiyuScan(`window:${k}`))
+          .then((ok) => {
+            // ⭐ 没投出去（目标会话没醒着之类）⇒ 把额度和间隔都退回去，下个周期还能重试
+            if (ok === false) {
+              bumpState(before)
+              log('自动刷：这一轮没投出去，额度已退回，稍后重试')
+            }
+          })
+          .catch((e) => { log('自动刷：投递异常（已兜住）' + (e?.message ?? e)) })
         return
       }
     } catch (e) {

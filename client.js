@@ -144,6 +144,7 @@ window.__ModuleLoader__.load({
       // ⚠️ 输入框必须绑"本地草稿"：页面每 5 秒轮询 /status，服务端那份会把 config 盖掉
       //    ⇒ 直接绑 cfg 的话，用户打字打到一半就被冲没了 ✗（2026-10-14 陌生人验收时抓到）
       const [perDay, setPerDay] = React.useState(null)
+      const [gapHours, setGapHours] = React.useState(null)
       const [perScan, setPerScan] = React.useState(null)
       const [perRound, setPerRound] = React.useState(null)
       const [dmUid, setDmUid] = React.useState(null)        // 私信收件人 UID（本地草稿）
@@ -176,6 +177,7 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         if (cfg && rl === null) setRl(cfg.reportLevel || 'full')
         if (cfg && perDay === null) setPerDay(String(cfg.perDay ?? 5))
+        if (cfg && gapHours === null) setGapHours(String(cfg.gapHours ?? 3))
         if (cfg && perScan === null) setPerScan(String(cfg.perScan ?? 1))
         if (cfg && perRound === null) setPerRound(String(cfg.commentPerRound ?? 1))
         if (cfg && mention === null) setMention(cfg.mentionName || '')
@@ -392,7 +394,17 @@ window.__ModuleLoader__.load({
               note: `${win[k].start} – ${win[k].end}`,
               on: sw(k),
               onChange: (v) => patch({ [k]: v }, win[k].label),
-            }))) : null),
+            })),
+            h('div', { 'data-bd-row': '' },
+              h('div', { 'data-bd-grow': '' },
+                h('div', { 'data-bd-label': '' }, '两轮之间至少隔几小时'),
+                h('div', { 'data-bd-note': '' }, '谷时窗口里按这个节奏一轮一轮来，跑到「每天最多自动刷几轮」用完为止；手动跑不受限制')),
+              h('input', {
+                'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 1, max: 12,
+                value: gapHours ?? '',
+                onChange: (e) => setGapHours(e.target.value),
+                onBlur: () => { const n = Math.max(1, Math.min(Number(gapHours) || 3, 12)); setGapHours(String(n)); patch({ gapHours: n }, '轮间隔') },
+              }))) : null),
 
         /* ── 派子代理刷的模型 ── */
         h('div', { 'data-bd-sec': '' },
