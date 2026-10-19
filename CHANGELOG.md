@@ -1,3 +1,19 @@
+## 0.2.1 — 2026-10-20
+
+**修一个 fork 改名漏改的地方（感谢评论区反馈）**
+
+- 🔴 **装完网页端整页报错**：
+  `web boot: 1 entry did not activate … loaded without registering dsh-bili-subagent`
+  根因：`client.js` 的自注册 id 还是旧名 `dsh-bili-scroll`，而 `package.json` 的 `name` 是
+  `dsh-bili-subagent` —— 加载器按包名找工厂，对不上就整页起不来。
+  ✅ 改成 `id: 'dsh-bili-subagent'`，并在文件里加了显眼注释。
+  （`selfcheck.mjs` 第 71 行本来就有这条断言，这次是补上"发布前真的跑一遍"。）
+- 🔧 **门槛现在会写日志**：`bili_search` 应用播放量/发布天数门槛时，往 `duty.log` 写一行
+  「搜索门槛生效：…」，以后"到底滤没滤"不用再猜。
+- 🔧 `client.js` 的自注册 id 与包名是否一致，加进了发布前自检。
+
+---
+
 ## 0.2.0 — 2026-10-19（dsh-bili-subagent）
 
 > 本仓库是 [c1overzz/dsh-bili-scroll](https://github.com/c1overzz/dsh-bili-scroll) 的改版（fork），

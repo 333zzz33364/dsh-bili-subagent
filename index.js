@@ -495,6 +495,8 @@ export function apply(ctx, config) {
         obj.videos = kept.slice(0, num)
         obj.count = obj.videos.length
         obj.filtered = note.join('；')
+        // 留一行日志：以后"门槛有没有生效"直接在 duty.log 里看得见，不用再猜
+        try { log('搜索门槛生效：' + (obj.filtered || '无') + '（返回 ' + obj.count + ' 条）') } catch (e) {}
         return JSON.stringify(obj)
       } catch (e) {
         return raw

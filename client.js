@@ -26,7 +26,10 @@
  * ============================================================================
  */
 window.__ModuleLoader__.load({
-  id: 'dsh-bili-scroll',
+  // ⚠️ 这一行必须等于 package.json 的 name（加载器按包名找工厂，对不上就报
+  //    "web boot: 1 entry did not activate … loaded without registering <包名>"）。
+  //    fork 改名时最容易漏的就是它 —— selfcheck.mjs / _preflight.js 都会断言这一条。
+  id: 'dsh-bili-subagent',
   factory: (require) => {
     const React = require('react')
     const h = React.createElement
