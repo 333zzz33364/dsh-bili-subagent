@@ -46,7 +46,7 @@ export const inject = ['webServer', 'tools', 'settings', 'subagents', 'agents', 
 //    （宁可少一个设置页，也不能因为一个 import 让整条插件不激活 ✗）
 
 // ⭐ 可配置的提示词模板（设置页能改；占位符：{owner}=主人称呼、{direction}=方向、{n}=条数）
-const SCAN_PROMPT_TMPL = '你去 B 站帮我转一圈，看看有什么值得看的。\n\n这次想看的：{direction}\n\n别急着下结论，按这个来：\n先搜一搜（近 7 天，按播放或最新都行），标题看着没意思的就跳过；\n有点意思的，再看看简介，判断值不值得点进去；\n觉得值得，就把它的字幕读一遍，弄清楚到底讲了什么——没字幕的就跳过；\n顺手翻翻评论区，看看大家真实怎么说。\n\n最后挑出最值得的，最多 {n} 条。每条都跟我说清楚：标题、BV号、讲了什么、为什么值得、评论区反响怎么样。\n\n⚠️ 每条第一行单独写「### BV号」，方便我统计。\n写完把报告交给我就行，不用替我发评论、也不用发私信——那些我自己来。'
+const SCAN_PROMPT_TMPL = '你去 B 站帮我转一圈，看看有什么值得看的。\n\n这次想看的：{direction}\n\n别急着下结论，按这个来：\n先搜一搜（**默认优先看近 7 天的**，按播放或最新都行），标题看着没意思的就跳过；\n⚠️ 「近 7 天」只是默认偏好，**不是硬门槛**：方向里点名了某条/某个时间的视频，就按点名的来，别拿「不在 7 天窗口内」当理由拒绝；确实要放宽，就先按点名的去找。\n有点意思的，再看看简介，判断值不值得点进去；\n觉得值得，就把它的字幕读一遍，弄清楚到底讲了什么——没字幕的就跳过；\n顺手翻翻评论区，看看大家真实怎么说。\n\n最后挑出最值得的，最多 {n} 条。每条都跟我说清楚：标题、BV号、讲了什么、为什么值得、评论区反响怎么样。\n\n⚠️ 每条第一行单独写「### BV号」，方便我统计。\n写完把报告交给我就行，不用替我发评论、也不用发私信——那些我自己来。'
 
 export const Config = !z ? undefined : z.object({
   /** 定量刷：每天最多挑几条 */
@@ -88,6 +88,8 @@ export const Config = !z ? undefined : z.object({
   ownerName: z.string().default('小鱿鱼').extra('volatile', true),
   /** ⭐ 子代理的人设+流程提示词（占位符 {owner}/{direction}/{n}） */
   scanPrompt: z.string().default(SCAN_PROMPT_TMPL).extra('volatile', true),
+  /** ⭐ 投递提示（发给伙伴看的那段）——空 = 用内置那套默认；可整段改，占位符见 HINT_PLACEHOLDERS */
+  hintPrompt: z.string().default('').extra('volatile', true),
   /** ⭐ 门槛：播放量低于这个数的直接不返回给子代理（0 = 不过滤） */
   minViews: z.natural().default(0).extra('volatile', true),
   /** ⭐ 门槛：发布不足这么多天的直接不返回给子代理（0 = 不过滤） */
@@ -170,6 +172,7 @@ export function apply(ctx, config) {
     targetSession: '',
     ownerName: '小鱿鱼',
     scanPrompt: SCAN_PROMPT_TMPL,
+    hintPrompt: '',
     minViews: 0,      // 播放量低于这个数的不给子代理看（0 = 不过滤）
     minAgeDays: 0,    // 发布不足这么多天的不给子代理看（0 = 不过滤）
   }
@@ -410,13 +413,27 @@ export function apply(ctx, config) {
     const commentOn = Boolean(cfg.autoComment && cfg.mentionName && cfg.dmMode !== 'only' && commentQuota > 0)
     if (commentOn) pendingComment = { at: Date.now() }   // 记账：这轮欠一条评论
     const dmOn = Boolean(cfg.dmMode !== 'off' && Number(cfg.dmUid) > 0)
+    const 评论块 = '· **评论区 @（公开！除了 ' + owner + '，别人也看得到）**：这是**发**评论——必须用 `bili_reply` 工具真发一条，**不是**用 `bili_comment` 去读评论（读评论是子代理已经干过的事，跟这一步无关）。**设置里已经开着，直接调 bili_reply 就行，不用传 force**。最多发 ' + commentQuota + ' 条，内容**极短**：只点一个最有意思的点/梗，然后 @ ' + cfg.mentionName + '，勾她去看。别写长、别写私密的话（大家都能看到）。'
+    const 私信块 = '· **私信（只 ' + owner + ' 一个人看）**：用 bili_send_message 发**详细版**——开头先叫一声「' + owner + '，」再往下说；标题、BV号、视频讲了啥都可以细说，给 UID ' + Number(cfg.dmUid) + '。'
     const parts = ['这份报告是给你的内部情报。接下来**你来**决定怎么递给' + owner + '（用你的口吻、别把内部术语写进去）']
-    if (commentOn) parts.push('· **评论区 @（公开！除了 ' + owner + '，别人也看得到）**：这是**发**评论——必须用 `bili_reply` 工具真发一条，**不是**用 `bili_comment` 去读评论（读评论是子代理已经干过的事，跟这一步无关）。**设置里已经开着，直接调 bili_reply 就行，不用传 force**。最多发 ' + commentQuota + ' 条，内容**极短**：只点一个最有意思的点/梗，然后 @ ' + cfg.mentionName + '，勾她去看。别写长、别写私密的话（大家都能看到）。')
-    if (dmOn) parts.push('· **私信（只 ' + owner + ' 一个人看）**：用 bili_send_message 发**详细版**——开头先叫一声「' + owner + '，」再往下说；标题、BV号、视频讲了啥都可以细说，给 UID ' + Number(cfg.dmUid) + '。')
+    if (commentOn) parts.push(评论块)
+    if (dmOn) parts.push(私信块)
     if (!commentOn && !dmOn) parts.push('报告拿给你了，你自己看着跟' + owner + '聊。')
     if (commentOn && dmOn) parts.push('⚠️ **这两件都要做，别只做一件**：先调 `bili_reply` 把评论 @ 发了，再调 `bili_send_message` 发私信（没发评论之前，私信会被拒）。')
     parts.push('⚠️ 无论会话里讲、评论、还是私信，**都必须带 BV 号**（标题后紧跟 BV1xxxxxxx），' + owner + ' 要靠它找原视频。')
-    const hint = parts.join('\n')
+    const 默认hint = parts.join('\n')
+    // ⭐ 2026-10-21：这段「发给伙伴看的提示」也让人自己改（设置页 hintPrompt）
+    //    空 = 用上面的默认那套；给了就按模板替换占位符
+    const hintTpl = String(cfg.hintPrompt || '').trim()
+    const hint = hintTpl
+      ? hintTpl
+        .split('{owner}').join(owner)
+        .split('{mention}').join(String(cfg.mentionName || ''))
+        .split('{commentQuota}').join(String(commentQuota))
+        .split('{uid}').join(String(Number(cfg.dmUid) || 0))
+        .split('{commentBlock}').join(commentOn ? 评论块 : '（这一轮不发评论）')
+        .split('{dmBlock}').join(dmOn ? 私信块 : '（这一轮不发私信）')
+      : 默认hint
     // ⭐ 每一轮的报告都写回报告文件（设置页「看报告」能回看）；「日报写多细=不写」时跳过
     if (level !== 'off') { try { appendFileSync(reportFileOf(), '\n\n---\n\n' + output + '\n', 'utf8') } catch {} }
     return { ok: true, report: output, hint }

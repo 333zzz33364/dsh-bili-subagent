@@ -156,6 +156,7 @@ window.__ModuleLoader__.load({
       const [subModel, setSubModel] = React.useState(null)         // 派子代理用的 model
       const [ownerName, setOwnerName] = React.useState(null)       // 称呼
       const [scanPrompt, setScanPrompt] = React.useState(null)     // 子代理提示词
+      const [hintPrompt, setHintPrompt] = React.useState(null)     // 投递提示（发给伙伴看的那段）
       const [targetSession, setTargetSession] = React.useState(null) // 自动刷在哪个会话触发
       const [minViews, setMinViews] = React.useState(null)           // 门槛：最低播放量（0 = 不过滤）
       const [minAgeDays, setMinAgeDays] = React.useState(null)       // 门槛：至少发布几天（0 = 不过滤）
@@ -190,6 +191,7 @@ window.__ModuleLoader__.load({
         if (cfg && subModel === null) setSubModel(cfg.subModel || 'deepseek-v4-pro')
         if (cfg && ownerName === null) setOwnerName(cfg.ownerName || '小鱿鱼')
         if (cfg && scanPrompt === null) setScanPrompt(cfg.scanPrompt || '')
+        if (cfg && hintPrompt === null) setHintPrompt(cfg.hintPrompt || '')
         if (cfg && targetSession === null) setTargetSession(cfg.targetSession || '')
         if (cfg && minViews === null) setMinViews(String(cfg.minViews ?? 0))
         if (cfg && minAgeDays === null) setMinAgeDays(String(cfg.minAgeDays ?? 0))
@@ -450,13 +452,13 @@ window.__ModuleLoader__.load({
         /* ── 提示词（可改） ── */
         h('div', { 'data-bd-sec': '' },
           h('div', { 'data-bd-h': '' }, '提示词（可改）'),
-          h('div', { 'data-bd-note': '' }, '称呼 + 子代理提示词。改了「称呼」，所有提示里的「小鱿鱼」都跟着变。'),
+          h('div', { 'data-bd-note': '' }, '称呼 + 两段提示词。改了「称呼」，提示词和投递提示里的名字都跟着变。'),
           h('div', { 'data-bd-row': '' },
             h('div', { 'data-bd-grow': '' },
               h('div', { 'data-bd-label': '' }, '称呼'),
               h('input', {
                 'data-bd-input': '', value: ownerName ?? '',
-                placeholder: '小鱿鱼',
+                placeholder: '比如：小鱿鱼',
                 onChange: (e) => setOwnerName(e.target.value),
                 onBlur: () => patch({ ownerName: String(ownerName || '').trim() || '小鱿鱼' }, '称呼'),
               }))),
@@ -466,6 +468,18 @@ window.__ModuleLoader__.load({
             value: scanPrompt ?? '',
             onChange: (e) => setScanPrompt(e.target.value),
             onBlur: () => patch({ scanPrompt: String(scanPrompt || '') }, '子代理提示词'),
+          }),
+          h('div', { 'data-bd-label': '' }, '投递提示（发给伙伴看的那段：告诉它拿到报告后该怎么发评论/私信）'),
+          h('div', { 'data-bd-note': '' },
+            '留空 = 用内置那套。想改就整段写，可用占位符：' +
+            '{owner}=称呼、{mention}=要@谁、{commentQuota}=每轮评论条数、{uid}=私信UID、' +
+            '{commentBlock}=自动填好"发评论"那段、{dmBlock}=自动填好"发私信"那段。'),
+          h('textarea', {
+            'data-bd-input': '', rows: 6,
+            value: hintPrompt ?? '',
+            placeholder: '（留空 = 用内置默认）',
+            onChange: (e) => setHintPrompt(e.target.value),
+            onBlur: () => patch({ hintPrompt: String(hintPrompt || '') }, '投递提示'),
           })),
         /* ── 一轮挑几条 ── */
         h('div', { 'data-bd-sec': '' },
