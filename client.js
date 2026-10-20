@@ -157,6 +157,7 @@ window.__ModuleLoader__.load({
       const [ownerName, setOwnerName] = React.useState(null)       // 称呼
       const [scanPrompt, setScanPrompt] = React.useState(null)     // 子代理提示词
       const [hintPrompt, setHintPrompt] = React.useState(null)     // 投递提示（发给伙伴看的那段）
+      const [triggerPrompt, setTriggerPrompt] = React.useState(null) // 自动刷触发语
       const [targetSession, setTargetSession] = React.useState(null) // 自动刷在哪个会话触发
       const [minViews, setMinViews] = React.useState(null)           // 门槛：最低播放量（0 = 不过滤）
       const [minAgeDays, setMinAgeDays] = React.useState(null)       // 门槛：至少发布几天（0 = 不过滤）
@@ -192,6 +193,7 @@ window.__ModuleLoader__.load({
         if (cfg && ownerName === null) setOwnerName(cfg.ownerName || '小鱿鱼')
         if (cfg && scanPrompt === null) setScanPrompt(cfg.scanPrompt || '')
         if (cfg && hintPrompt === null) setHintPrompt(cfg.hintPrompt || '')
+        if (cfg && triggerPrompt === null) setTriggerPrompt(cfg.triggerPrompt || '')
         if (cfg && targetSession === null) setTargetSession(cfg.targetSession || '')
         if (cfg && minViews === null) setMinViews(String(cfg.minViews ?? 0))
         if (cfg && minAgeDays === null) setMinAgeDays(String(cfg.minAgeDays ?? 0))
@@ -480,6 +482,15 @@ window.__ModuleLoader__.load({
             placeholder: '（留空 = 用内置默认）',
             onChange: (e) => setHintPrompt(e.target.value),
             onBlur: () => patch({ hintPrompt: String(hintPrompt || '') }, '投递提示'),
+          }),
+          h('div', { 'data-bd-label': '' }, '自动刷触发语（到点时往会话里塞给伙伴的那一句）'),
+          h('div', { 'data-bd-note': '' }, '就是「到谷时啦，去 B 站刷一轮吧～」那句。可用占位符：{owner}=称呼。'),
+          h('textarea', {
+            'data-bd-input': '', rows: 3,
+            value: triggerPrompt ?? '',
+            placeholder: '（留空 = 用内置默认）',
+            onChange: (e) => setTriggerPrompt(e.target.value),
+            onBlur: () => patch({ triggerPrompt: String(triggerPrompt || '') }, '自动刷触发语'),
           })),
         /* ── 一轮挑几条 ── */
         h('div', { 'data-bd-sec': '' },

@@ -48,6 +48,9 @@ export const inject = ['webServer', 'tools', 'settings', 'subagents', 'agents', 
 // ⭐ 可配置的提示词模板（设置页能改；占位符：{owner}=主人称呼、{direction}=方向、{n}=条数）
 const SCAN_PROMPT_TMPL = '你去 B 站帮我转一圈，看看有什么值得看的。\n\n这次想看的：{direction}\n\n别急着下结论，按这个来：\n先搜一搜（**默认优先看近 7 天的**，按播放或最新都行），标题看着没意思的就跳过；\n⚠️ 「近 7 天」只是默认偏好，**不是硬门槛**：方向里点名了某条/某个时间的视频，就按点名的来，别拿「不在 7 天窗口内」当理由拒绝；确实要放宽，就先按点名的去找。\n有点意思的，再看看简介，判断值不值得点进去；\n觉得值得，就把它的字幕读一遍，弄清楚到底讲了什么——没字幕的就跳过；\n顺手翻翻评论区，看看大家真实怎么说。\n\n最后挑出最值得的，最多 {n} 条。每条都跟我说清楚：标题、BV号、讲了什么、为什么值得、评论区反响怎么样。\n\n⚠️ 每条第一行单独写「### BV号」，方便我统计。\n写完把报告交给我就行，不用替我发评论、也不用发私信——那些我自己来。'
 
+// ⭐ 自动刷触发语：到点时往「目标会话」里塞给伙伴的那一句（设置页可改）
+const TRIGGER_TMPL = '（到谷时啦，去 B 站刷一轮吧～想看什么方向你自己定，用 bili_scan 就行；刷完按设置，该发评论发评论、该发私信发私信。）'
+
 export const Config = !z ? undefined : z.object({
   /** 定量刷：每天最多挑几条 */
   perDay: z.natural().default(5).extra('volatile', true),
@@ -90,6 +93,8 @@ export const Config = !z ? undefined : z.object({
   scanPrompt: z.string().default(SCAN_PROMPT_TMPL).extra('volatile', true),
   /** ⭐ 投递提示（发给伙伴看的那段）——空 = 用内置那套默认；可整段改，占位符见 HINT_PLACEHOLDERS */
   hintPrompt: z.string().default('').extra('volatile', true),
+  /** ⭐ 自动刷触发语（到点塞进目标会话的那句）——可改，{owner}=称呼 */
+  triggerPrompt: z.string().default(TRIGGER_TMPL).extra('volatile', true),
   /** ⭐ 门槛：播放量低于这个数的直接不返回给子代理（0 = 不过滤） */
   minViews: z.natural().default(0).extra('volatile', true),
   /** ⭐ 门槛：发布不足这么多天的直接不返回给子代理（0 = 不过滤） */
@@ -173,6 +178,7 @@ export function apply(ctx, config) {
     ownerName: '小鱿鱼',
     scanPrompt: SCAN_PROMPT_TMPL,
     hintPrompt: '',
+    triggerPrompt: TRIGGER_TMPL,
     minViews: 0,      // 播放量低于这个数的不给子代理看（0 = 不过滤）
     minAgeDays: 0,    // 发布不足这么多天的不给子代理看（0 = 不过滤）
   }
@@ -844,7 +850,11 @@ export function apply(ctx, config) {
     const msg = {
       id: randomUUID(),
       role: 'user',
-      content: [{ type: 'text', text: '（到谷时啦，去 B 站刷一轮吧～想看什么方向你自己定，用 bili_scan 就行；刷完按设置，该发评论发评论、该发私信发私信。）' }],
+      // ⭐ 这段是设置页「自动刷触发语」，可改；留空回落到内置默认
+      content: [{ type: 'text', text: (() => {
+        const t = String(cfg.triggerPrompt || '').trim() || TRIGGER_TMPL
+        return t.split('{owner}').join(String(cfg.ownerName || '你'))
+      })() }],
       source: { kind: 'bili-duty-scan' },
     }
     try {
