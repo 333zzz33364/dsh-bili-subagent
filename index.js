@@ -51,6 +51,18 @@ const SCAN_PROMPT_TMPL = '你去 B 站帮我转一圈，看看有什么值得看
 // ⭐ 自动刷触发语：到点时往「目标会话」里塞给伙伴的那一句（设置页可改）
 const TRIGGER_TMPL = '（到谷时啦，去 B 站刷一轮吧～想看什么方向你自己定，用 bili_scan 就行；刷完按设置，该发评论发评论、该发私信发私信。）'
 
+// ⭐ 投递提示的**默认模板**：设置页直接把这个当默认值填在框里（不是留空！）
+//    占位符：{owner} {mention} {commentQuota} {uid}
+//            {commentBlock} / {dmBlock} / {bothBlock}（这三段按设置自动填或留空）
+const HINT_TMPL = [
+  '这份报告是给你的内部情报。接下来**你来**决定怎么递给{owner}（用你的口吻、别把内部术语写进去）',
+  '{commentBlock}',
+  '{dmBlock}',
+  '{bothBlock}',
+  '{noneBlock}',
+  '⚠️ 无论会话里讲、评论、还是私信，**都必须带 BV 号**（标题后紧跟 BV1xxxxxxx），{owner} 要靠它找原视频。',
+].join('\n')
+
 export const Config = !z ? undefined : z.object({
   /** 定量刷：每天最多挑几条 */
   perDay: z.natural().default(5).extra('volatile', true),
@@ -92,7 +104,7 @@ export const Config = !z ? undefined : z.object({
   /** ⭐ 子代理的人设+流程提示词（占位符 {owner}/{direction}/{n}） */
   scanPrompt: z.string().default(SCAN_PROMPT_TMPL).extra('volatile', true),
   /** ⭐ 投递提示（发给伙伴看的那段）——空 = 用内置那套默认；可整段改，占位符见 HINT_PLACEHOLDERS */
-  hintPrompt: z.string().default('').extra('volatile', true),
+  hintPrompt: z.string().default(HINT_TMPL).extra('volatile', true),
   /** ⭐ 自动刷触发语（到点塞进目标会话的那句）——可改，{owner}=称呼 */
   triggerPrompt: z.string().default(TRIGGER_TMPL).extra('volatile', true),
   /** ⭐ 门槛：播放量低于这个数的直接不返回给子代理（0 = 不过滤） */
@@ -177,7 +189,7 @@ export function apply(ctx, config) {
     targetSession: '',
     ownerName: '小鱿鱼',
     scanPrompt: SCAN_PROMPT_TMPL,
-    hintPrompt: '',
+    hintPrompt: HINT_TMPL,
     triggerPrompt: TRIGGER_TMPL,
     minViews: 0,      // 播放量低于这个数的不给子代理看（0 = 不过滤）
     minAgeDays: 0,    // 发布不足这么多天的不给子代理看（0 = 不过滤）
@@ -261,6 +273,9 @@ export function apply(ctx, config) {
       const venvPy = join(stateDir, '.venv', 'Scripts', 'python.exe')
       if (existsSync(venvPy)) out.pythonPath = venvPy
     }
+    // ⭐ 这两段提示词：存着空串也补成默认文案 —— 设置页里要「看得见默认」
+    if (!String(out.hintPrompt || '').trim()) out.hintPrompt = HINT_TMPL
+    if (!String(out.triggerPrompt || '').trim()) out.triggerPrompt = TRIGGER_TMPL
     return clampPatch(out)
   }
   const cfg = loadCfg()
@@ -421,25 +436,22 @@ export function apply(ctx, config) {
     const dmOn = Boolean(cfg.dmMode !== 'off' && Number(cfg.dmUid) > 0)
     const 评论块 = '· **评论区 @（公开！除了 ' + owner + '，别人也看得到）**：这是**发**评论——必须用 `bili_reply` 工具真发一条，**不是**用 `bili_comment` 去读评论（读评论是子代理已经干过的事，跟这一步无关）。**设置里已经开着，直接调 bili_reply 就行，不用传 force**。最多发 ' + commentQuota + ' 条，内容**极短**：只点一个最有意思的点/梗，然后 @ ' + cfg.mentionName + '，勾她去看。别写长、别写私密的话（大家都能看到）。'
     const 私信块 = '· **私信（只 ' + owner + ' 一个人看）**：用 bili_send_message 发**详细版**——开头先叫一声「' + owner + '，」再往下说；标题、BV号、视频讲了啥都可以细说，给 UID ' + Number(cfg.dmUid) + '。'
-    const parts = ['这份报告是给你的内部情报。接下来**你来**决定怎么递给' + owner + '（用你的口吻、别把内部术语写进去）']
-    if (commentOn) parts.push(评论块)
-    if (dmOn) parts.push(私信块)
-    if (!commentOn && !dmOn) parts.push('报告拿给你了，你自己看着跟' + owner + '聊。')
-    if (commentOn && dmOn) parts.push('⚠️ **这两件都要做，别只做一件**：先调 `bili_reply` 把评论 @ 发了，再调 `bili_send_message` 发私信（没发评论之前，私信会被拒）。')
-    parts.push('⚠️ 无论会话里讲、评论、还是私信，**都必须带 BV 号**（标题后紧跟 BV1xxxxxxx），' + owner + ' 要靠它找原视频。')
-    const 默认hint = parts.join('\n')
-    // ⭐ 2026-10-21：这段「发给伙伴看的提示」也让人自己改（设置页 hintPrompt）
-    //    空 = 用上面的默认那套；给了就按模板替换占位符
-    const hintTpl = String(cfg.hintPrompt || '').trim()
+    const 都要块 = '⚠️ **这两件都要做，别只做一件**：先调 `bili_reply` 把评论 @ 发了，再调 `bili_send_message` 发私信（没发评论之前，私信会被拒）。'
+    const 都不要块 = '报告拿给你了，你自己看着跟' + owner + '聊。'
+    // ⭐ 2026-10-21：投递提示改成「模板常驻」（设置页里显示的就是默认文案，不是留空）
+    const hintTpl = String(cfg.hintPrompt || '').trim() || HINT_TMPL
     const hint = hintTpl
-      ? hintTpl
-        .split('{owner}').join(owner)
-        .split('{mention}').join(String(cfg.mentionName || ''))
-        .split('{commentQuota}').join(String(commentQuota))
-        .split('{uid}').join(String(Number(cfg.dmUid) || 0))
-        .split('{commentBlock}').join(commentOn ? 评论块 : '（这一轮不发评论）')
-        .split('{dmBlock}').join(dmOn ? 私信块 : '（这一轮不发私信）')
-      : 默认hint
+      .split('{owner}').join(owner)
+      .split('{mention}').join(String(cfg.mentionName || ''))
+      .split('{commentQuota}').join(String(commentQuota))
+      .split('{uid}').join(String(Number(cfg.dmUid) || 0))
+      .split('{commentBlock}').join(commentOn ? 评论块 : '')
+      .split('{dmBlock}').join(dmOn ? 私信块 : '')
+      .split('{bothBlock}').join(commentOn && dmOn ? 都要块 : '')
+      .split('{noneBlock}').join(!commentOn && !dmOn ? 都不要块 : '')
+      // 占位符留空后会剩下空行，收一下
+      .replace(/\n{3,}/g, '\n\n')
+      .split('\n').filter((x) => x.trim() !== '').join('\n')
     // ⭐ 每一轮的报告都写回报告文件（设置页「看报告」能回看）；「日报写多细=不写」时跳过
     if (level !== 'off') { try { appendFileSync(reportFileOf(), '\n\n---\n\n' + output + '\n', 'utf8') } catch {} }
     return { ok: true, report: output, hint }
@@ -1139,7 +1151,8 @@ export function apply(ctx, config) {
     if (req.method === 'GET' && path === '/api/bili-duty/status') return sendJson(res, 200, status())
 
     if (req.method === 'GET' && path === '/api/bili-duty/config') {
-      return sendJson(res, 200, { ok: true, config: cfg, windows: WINDOWS, home: stateDir })
+      // ⭐ defaults 一起发：设置页「恢复默认」按钮要用（不然别人不知道默认文案是啥）
+      return sendJson(res, 200, { ok: true, config: cfg, defaults: DEFAULTS, windows: WINDOWS, home: stateDir })
     }
 
     if (req.method === 'POST' && path === '/api/bili-duty/config') {

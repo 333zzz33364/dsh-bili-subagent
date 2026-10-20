@@ -158,6 +158,7 @@ window.__ModuleLoader__.load({
       const [scanPrompt, setScanPrompt] = React.useState(null)     // 子代理提示词
       const [hintPrompt, setHintPrompt] = React.useState(null)     // 投递提示（发给伙伴看的那段）
       const [triggerPrompt, setTriggerPrompt] = React.useState(null) // 自动刷触发语
+      const [cfgDefaults, setCfgDefaults] = React.useState(null)      // 服务端给的默认文案（「恢复默认」用）
       const [targetSession, setTargetSession] = React.useState(null) // 自动刷在哪个会话触发
       const [minViews, setMinViews] = React.useState(null)           // 门槛：最低播放量（0 = 不过滤）
       const [minAgeDays, setMinAgeDays] = React.useState(null)       // 门槛：至少发布几天（0 = 不过滤）
@@ -179,6 +180,7 @@ window.__ModuleLoader__.load({
       }, [])
 
       const cfg = st?.config
+      if (st && st.defaults && cfgDefaults === null) setCfgDefaults(st.defaults)
       React.useEffect(() => {
         if (cfg && rl === null) setRl(cfg.reportLevel || 'full')
         if (cfg && perDay === null) setPerDay(String(cfg.perDay ?? 5))
@@ -473,25 +475,45 @@ window.__ModuleLoader__.load({
           }),
           h('div', { 'data-bd-label': '' }, '投递提示（发给伙伴看的那段：告诉它拿到报告后该怎么发评论/私信）'),
           h('div', { 'data-bd-note': '' },
-            '留空 = 用内置那套。想改就整段写，可用占位符：' +
+            '框里就是现在的文案（默认那份已经填好了，直接改就行）。可用占位符：' +
             '{owner}=称呼、{mention}=要@谁、{commentQuota}=每轮评论条数、{uid}=私信UID、' +
-            '{commentBlock}=自动填好"发评论"那段、{dmBlock}=自动填好"发私信"那段。'),
+            '{commentBlock}/{dmBlock}/{bothBlock}/{noneBlock}=按设置自动填那几段（不该出现就留空）。'),
+          h('div', { 'data-bd-row': '' },
+            h('button', {
+              'data-bd-btn': '',
+              onClick: () => {
+                const d = cfgDefaults && cfgDefaults.hintPrompt
+                if (!d) return
+                setHintPrompt(d)
+                patch({ hintPrompt: d }, '投递提示')
+              },
+            }, '恢复默认'),
+            h('span', { 'data-bd-note': '' }, '改坏了点这个，就回到出厂那份')),
           h('textarea', {
             'data-bd-input': '', rows: 6,
             value: hintPrompt ?? '',
-            placeholder: '（留空 = 用内置默认）',
+            placeholder: '（这里应该已经填好默认文案；空的话点「恢复默认」）',
             onChange: (e) => setHintPrompt(e.target.value),
             onBlur: () => patch({ hintPrompt: String(hintPrompt || '') }, '投递提示'),
           }),
           h('div', { 'data-bd-label': '' }, '自动刷触发语（到点时往会话里塞给伙伴的那一句）'),
-          h('div', { 'data-bd-note': '' }, '就是「到谷时啦，去 B 站刷一轮吧～」那句。可用占位符：{owner}=称呼。'),
+          h('div', { 'data-bd-note': '' }, '框里就是现在这句（默认已经填好）。可用占位符：{owner}=称呼。'),
           h('textarea', {
             'data-bd-input': '', rows: 3,
             value: triggerPrompt ?? '',
-            placeholder: '（留空 = 用内置默认）',
             onChange: (e) => setTriggerPrompt(e.target.value),
             onBlur: () => patch({ triggerPrompt: String(triggerPrompt || '') }, '自动刷触发语'),
-          })),
+          }),
+          h('div', { 'data-bd-row': '' },
+            h('button', {
+              'data-bd-btn': '',
+              onClick: () => {
+                const d = cfgDefaults && cfgDefaults.triggerPrompt
+                if (!d) return
+                setTriggerPrompt(d)
+                patch({ triggerPrompt: d }, '自动刷触发语')
+              },
+            }, '恢复默认'))),
         /* ── 一轮挑几条 ── */
         h('div', { 'data-bd-sec': '' },
           h('div', { 'data-bd-h': '' }, '一轮挑几条'),
