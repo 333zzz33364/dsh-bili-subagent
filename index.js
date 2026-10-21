@@ -32,6 +32,7 @@ import { verifyRecent, appendVerifyToReport } from './lib/verify.mjs'
 import { WINDOWS, stateDirOf, readJson, writeJson, ensureHomeFiles, inWindow, dayKey } from './lib/state.mjs'
 import { loginStart, loginPoll, saveCredential, renderQrPng } from './lib/login.mjs'
 import { ensureUv } from './lib/uvfetch.mjs'
+import { createSelfUpdate } from './lib/selfupdate.mjs'
 
 export const name = 'bili-scroll'
 export const inject = ['webServer', 'tools', 'settings', 'subagents', 'agents', 'llm']
@@ -1145,9 +1146,16 @@ export function apply(ctx, config) {
     }
   }
 
+  // ⭐ 设置页那个「检查更新」：查这个插件自己的仓库（地址从 package.json 读）
+  const 自查更新 = createSelfUpdate({ packageRoot: pluginDir, diag: log })
+
   const handle = async (req, res, url) => {
     refreshCfg()
     const path = url.pathname
+    if (req.method === 'GET' && path === '/api/bili-duty/update') {
+      const r = await 自查更新.check(url.searchParams.get('refresh') === '1')
+      return sendJson(res, 200, { ok: true, ...r })
+    }
     if (req.method === 'GET' && path === '/api/bili-duty/status') return sendJson(res, 200, status())
 
     if (req.method === 'GET' && path === '/api/bili-duty/config') {

@@ -58,6 +58,7 @@ window.__ModuleLoader__.load({
 [data-bd-grow]{flex:1;min-width:0;}
 [data-bd-label]{font-size:13px;}
 [data-bd-note]{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,#9aa0a6);}
+[data-bd-code]{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;line-height:1.65;white-space:pre-wrap;word-break:break-all;padding:8px 10px;border-radius:7px;background:rgba(127,127,127,.10);}
 [data-bd-sw]{flex:none;width:38px;height:22px;border-radius:11px;border:0;cursor:pointer;position:relative;
   background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.35));transition:background .15s;padding:0;}
 [data-bd-sw][data-on]{background:#3b82f6;}
@@ -167,6 +168,8 @@ window.__ModuleLoader__.load({
       const [mention, setMention] = React.useState(null)
       const [login, setLogin] = React.useState(null)
       const [runNote, setRunNote] = React.useState(null)
+      const [up, setUp] = React.useState(null)          // 这个插件自己的版本信息
+      const [upBusy, setUpBusy] = React.useState(false)
       const [report, setReport] = React.useState(null)        // 非 null = 报告已展开   // 顶部那行状态（跑一轮/装依赖的反馈原来在最底下，看不见）
       const [loginState, setLoginState] = React.useState('')
       const [loginTone, setLoginTone] = React.useState('')
@@ -200,6 +203,7 @@ window.__ModuleLoader__.load({
         if (cfg && minViews === null) setMinViews(String(cfg.minViews ?? 0))
         if (cfg && minAgeDays === null) setMinAgeDays(String(cfg.minAgeDays ?? 0))
       }, [cfg])
+      React.useEffect(() => { jget('/update').then((r) => setUp(r)).catch(() => {}) }, [])
 
       React.useEffect(() => {
         let aliveM = true
@@ -372,6 +376,17 @@ window.__ModuleLoader__.load({
         return h('div', { 'data-bd-page': '' }, h('div', { 'data-bd-note': '' }, '读设置中…'))
       }
 
+      const 更新命令 = ['dsh plugin --profile web remove dsh-bili-subagent', 'dsh plugin --profile web add dsh-bili-subagent'].join(String.fromCharCode(10))
+      const checkUpdate = async () => {
+        setUpBusy(true)
+        try {
+          const r = await jget('/update?refresh=1')
+          if (r) setUp(r)
+          setMsg(!r ? '查不到（网络）' : r.hasUpdate ? '有新版本 v' + r.latest : r.ok ? '已经是最新版' : '查不到：' + (r.error || '网络'))
+        } catch (e) { setMsg('查不到：' + (e && e.message)) }
+        setUpBusy(false)
+      }
+
       const sw = (k) => Boolean(cfg[k])
 
       return h('div', { 'data-bd-page': '' },
@@ -386,6 +401,28 @@ window.__ModuleLoader__.load({
           h('button', { 'data-bd-btn': '', disabled: busy === 'run', onClick: onRun }, '现在跑一轮')),
           runNote ? h('div', { 'data-bd-msg': '', 'data-good': runNote.tone === 'good' ? '' : undefined,
             'data-warn': runNote.tone === 'warn' ? '' : undefined }, runNote.t) : null,
+
+        /* ── 版本 / 检查更新 ── */
+        h('div', { 'data-bd-sec': '' },
+          h('div', { 'data-bd-h': '' }, '版本'),
+          h('div', { 'data-bd-row': '' },
+            h('span', { 'data-bd-note': '' },
+              !up ? '正在看有没有新版…'
+                : up.hasUpdate ? '仓库里已经有 v' + up.latest + ' 了'
+                  : up.ok ? '已经是最新版' : '暂时查不到（' + (up.error || '网络') + '）—— 这不代表没有问题'),
+            h('div', { 'data-bd-grow': '' }),
+            h('button', { 'data-bd-btn': '', disabled: upBusy, onClick: checkUpdate },
+              upBusy ? '查…' : '检查更新')),
+          (up && up.hasUpdate) ? h('div', { 'data-bd-note': '' }, '更新方法：先卸旧版再装新版（直接装可能拿到缓存里的旧副本）。') : null,
+          (up && up.hasUpdate) ? h('div', { 'data-bd-code': '' }, 更新命令) : null,
+          (up && up.hasUpdate)
+            ? h('div', { 'data-bd-row': '' },
+              h('button', {
+                'data-bd-btn': '',
+                onClick: () => navigator.clipboard.writeText(更新命令).then(() => setMsg('命令已复制')).catch(() => setMsg('复制不了，手动选中吧')),
+              }, '复制命令'),
+              (up.repoUrl ? h('a', { 'data-bd-note': '', href: up.repoUrl, target: '_blank', rel: 'noreferrer' }, '去 GitHub 看看') : null))
+            : null),
 
         /* ── 定时 ── */
         h('div', { 'data-bd-sec': '' },
