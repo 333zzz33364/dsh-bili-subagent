@@ -170,6 +170,7 @@ window.__ModuleLoader__.load({
       const [up, setUp] = React.useState(null)          // 这个插件自己的版本信息
       const [inboxUids, setInboxUids] = React.useState(null)        // 还要理谁（本地草稿）
       const [inboxMaxRemind, setInboxMaxRemind] = React.useState(null)  // 没回提醒几次（本地草稿）
+      const [inboxPerDay, setInboxPerDay] = React.useState(null)        // 一天最多回别人几条（本地草稿）
       const [upBusy, setUpBusy] = React.useState(false)
       const [report, setReport] = React.useState(null)        // 非 null = 报告已展开   // 顶部那行状态（跑一轮/装依赖的反馈原来在最底下，看不见）
       const [loginState, setLoginState] = React.useState('')
@@ -199,6 +200,7 @@ window.__ModuleLoader__.load({
         if (cfg && ownerName === null) setOwnerName(cfg.ownerName || '小鱿鱼')
         if (cfg && inboxUids === null) setInboxUids(String(cfg.inboxUids || ''))
         if (cfg && inboxMaxRemind === null) setInboxMaxRemind(String(cfg.inboxMaxRemind ?? 2))
+        if (cfg && inboxPerDay === null) setInboxPerDay(String(cfg.inboxPerDay ?? 5))
         if (cfg && scanPrompt === null) setScanPrompt(cfg.scanPrompt || '')
         if (cfg && hintPrompt === null) setHintPrompt(cfg.hintPrompt || '')
         if (cfg && triggerPrompt === null) setTriggerPrompt(cfg.triggerPrompt || '')
@@ -509,7 +511,7 @@ window.__ModuleLoader__.load({
               onChange: (e) => setInboxUids(e.target.value),
               onBlur: () => patch({ inboxUids: String(inboxUids || '').trim() }, '还要理谁'),
             }),
-            h('div', { 'data-bd-note': '' }, '逗号分隔的 UID。留空 = 只理「私信 UID」那个号；别人的乱 @ 一律不管。')),
+            h('div', { 'data-bd-note': '' }, '逗号分隔的 UID。**留空 = 谁都理**（谁 @ 你、谁回你都告诉你）；填了 = 只理这些人。')),
           h(ToggleRow, {
             label: '同一条只提醒一次',
             note: '开着 = 每条 @ / 回复最多提一次（等于别人最多回 1 条）；关掉 = 没回就再提，直到用完下面的次数',
@@ -529,6 +531,19 @@ window.__ModuleLoader__.load({
               },
             }),
             h('div', { 'data-bd-note': '' }, '她一直没回的话，最多再提几次就停（默认 2）。开着「同一条只提醒一次」时，这个数用不上。')),
+          h('div', { 'data-bd-sub': '' },
+            h('div', { 'data-bd-label': '' }, '一天最多回别人几条'),
+            h('input', {
+              'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 0, max: 30,
+              value: inboxPerDay ?? '5',
+              onChange: (e) => setInboxPerDay(e.target.value),
+              onBlur: () => {
+                const n = Math.max(0, Math.min(30, Number(inboxPerDay) || 0))
+                setInboxPerDay(String(n))
+                patch({ inboxPerDay: n }, '一天最多回别人几条')
+              },
+            }),
+            h('div', { 'data-bd-note': '' }, '「别人」的 @ 和回复一天最多递几条给她；到了上限就不再递（明天重新算）。**你自己 @ 她不算额度**。填 0 = 别人的一律不递。')),
           h('div', { 'data-bd-row': '' },
             h('button', { 'data-bd-btn': '', disabled: busy === 'inbox', onClick: onInbox },
               busy === 'inbox' ? '看…' : '现在就去看一眼'))),

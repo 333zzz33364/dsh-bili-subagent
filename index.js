@@ -199,6 +199,7 @@ export function apply(ctx, config) {
     inboxUids: '',        // 额外要理的人（逗号分隔 uid）。留空 = 只理「私信 UID」那个号
     inboxOnceOnly: true,  // 同一条只提醒一次（= 别人最多回 1 条）
     inboxMaxRemind: 2,    // 没回的话最多提醒几次，之后不再提
+    inboxPerDay: 5,       // ⭐ 一天最多回「别人」几条 —— 防刷，也防她一天耗太多
   }
   const normalize = (src, base) => {
     const out = { ...base }
@@ -866,14 +867,15 @@ export function apply(ctx, config) {
   //     不派子代理代回（那会变人机味）；不强制、不评分、不替她措辞。
   const inboxFile = join(stateDir, 'inbox.json')
 
+  // ⭐ 返回 null = **不过滤**（谁都理）；返回 Set = 只理名单里这些人。
+  //    ⚠️ 一开始是"留空就只理 dmUid"，可「别人回了我的评论」这条路的发送者**永远是别人**，
+  //       拿自己的 UID 当白名单等于把整个功能锁死（2026-10-21 她实测踩到）。
   const inboxTargets = () => {
     const set = new Set()
-    const dm = Number(cfg.dmUid || 0)
-    if (dm > 0) set.add(String(dm))
     for (const x of String(cfg.inboxUids || '').split(/[,，\s]+/)) {
       if (/^\d+$/.test(x)) set.add(x)
     }
-    return set
+    return set.size ? set : null
   }
 
   const 收件键 = (it) => String(it.kind || 'x') + ':' + String(it.rpid || it.id || '')
@@ -895,22 +897,53 @@ export function apply(ctx, config) {
     return items
   }
 
-  /** 拉一遍，挑出「该让她知道的」，顺手把提醒次数记上 */
+  /** 今天已经回过「别人」几条（自己 @ 自己的不算额度） */
+  function 今天回过别人几条() {
+    try {
+      const box = readJson(inboxFile, { seen: {} })
+      const today = dayKey(new Date())
+      const 自己 = Number(cfg.dmUid || 0)
+      let n = 0
+      for (const rec of Object.values(box.seen || {})) {
+        if (!rec || !rec.replied || !rec.repliedAt) continue
+        if (dayKey(new Date(Number(rec.repliedAt))) !== today) continue
+        const mid = Number(rec.mid || 0)
+        if (mid && mid === 自己) continue
+        n++
+      }
+      return n
+    } catch (e) { return 0 }
+  }
+
+  /** 拉一遍，挑出「该让她知道的」。**只挑不记账** —— 真递出去了才记（见 commitInbox） */
   async function pickInbox() {
     if (!cfg.inboxOn) return []
-    const who = inboxTargets()
-    if (!who.size) { log('收件箱：没配 UID（设置里填「私信 UID」，或在「还要理谁」里加），跳过'); return [] }
+    const who = inboxTargets()   // null = 谁都理
     const box = readJson(inboxFile, { seen: {} })
     if (!box.seen || typeof box.seen !== 'object') box.seen = {}
     const out = []
+    // ⭐ 一天最多回「别人」几条：自己 @ 自己的不算额度（那是必须回的）
+    const 自己号 = Number(cfg.dmUid || 0)
+    const 每天上限 = Math.max(0, Number(cfg.inboxPerDay ?? 5))
+    let 别人余 = Math.max(0, 每天上限 - 今天回过别人几条())
+    const 卡了 = []
     for (const it of await pullInbox()) {
-      if (!who.has(String(it.mid || ''))) continue          // 只理名单里的人，别人乱 @ 不管
+      if (who && !who.has(String(it.mid || ''))) continue    // 填了名单 = 只理这些人；留空 = 谁都理
       const k = 收件键(it)
       const rec = box.seen[k] || { n: 0, replied: false }
       if (rec.replied) continue                              // 回过了就不再提
       if (cfg.inboxOnceOnly && rec.n >= 1) continue           // 「同一条只提醒一次」
       if (rec.n >= Math.max(1, Number(cfg.inboxMaxRemind || 2))) continue
+      const 是别人 = Number(it.mid || 0) !== 自己号
+      if (是别人) {
+        if (别人余 <= 0) { 卡了.push(it); continue }          // 额度用完，这次不递
+        别人余--
+      }
       out.push(it)
+    }
+    if (卡了.length) {
+      log('收件箱：今天回别人的额度用完了（' + 今天回过别人几条() + '/' + 每天上限 + '），'
+        + 卡了.length + ' 条别人的先不递了')
     }
     return out
   }
@@ -925,6 +958,8 @@ export function apply(ctx, config) {
         const rec = box.seen[k] || { n: 0, replied: false }
         rec.n = Number(rec.n || 0) + 1
         rec.lastAt = Date.now()
+        rec.mid = Number(it.mid || 0)      // 谁的 —— 日额度只算「别人」
+        rec.kind = String(it.kind || '')
         box.seen[k] = rec
       }
       // ⭐ 顺手剪枝：只留最近的 300 条。不然 seen 只增不减，一年后是个几万条的 JSON
@@ -948,7 +983,11 @@ export function apply(ctx, config) {
       for (const k of Object.keys(box.seen)) {
         const rec = box.seen[k]
         // 同一条评论的精确匹配；没有 rpid 就按「这个视频处理过」整体放过
-        if (rpid && k.endsWith(':' + String(rpid))) { rec.replied = true; changed = true }
+        if (rpid && k.endsWith(':' + String(rpid))) {
+          rec.replied = true
+          rec.repliedAt = Date.now()
+          changed = true
+        }
       }
       if (changed) writeJson(inboxFile, box)
     } catch (e) { log('收件箱记账失败：' + (e?.message ?? e)) }
