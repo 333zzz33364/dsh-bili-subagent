@@ -437,8 +437,9 @@ export function apply(ctx, config) {
       return { ok: false, error: '子代理没正常跑完（' + (result?.stopReason || '未知') + '）' + (result?.diagnostic ? '：' + result.diagnostic : ''), partial: output }
     }
     // 投递提示：让大肥鱼知道接下来要不要发评论/私信（她拿报告后自己决定、自己发）
-    const commentQuota = Math.max(0, Number(cfg.commentPerRound || 0))
-    const commentOn = Boolean(cfg.autoComment && cfg.mentionName && cfg.dmMode !== 'only' && commentQuota > 0)
+    // ⚠️ 「每轮最多发几条评论」这个设置项已经去掉（上游用来管自动评论额度，被收件箱取代）。
+    //    闸只看：开着自动评论 + 填了要 @ 谁 + 不是「只私信」模式
+    const commentOn = Boolean(cfg.autoComment && cfg.mentionName && cfg.dmMode !== 'only')
     if (commentOn) pendingComment = { at: Date.now() }   // 记账：这轮欠一条评论
     const dmOn = Boolean(cfg.dmMode !== 'off' && Number(cfg.dmUid) > 0)
     const 评论块 = '· **评论区 @（公开！除了 ' + owner + '，别人也看得到）**：这是**发**评论——必须用 `bili_reply` 工具真发一条，**不是**用 `bili_comment` 去读评论（读评论是子代理已经干过的事，跟这一步无关）。**设置里已经开着，直接调 bili_reply 就行，不用传 force**。最多发 ' + commentQuota + ' 条，内容**极短**：只点一个最有意思的点/梗，然后 @ ' + cfg.mentionName + '，勾她去看。别写长、别写私密的话（大家都能看到）。'
@@ -574,7 +575,7 @@ export function apply(ctx, config) {
     description: '在视频下发一条评论，或回复某条评论（楼中楼）。短、干净、像人说的话。\n'
       + '⚠️ 回复别人的评论时**正文里不要手打 @** —— B站会自己加「回复 @某某」，你再加一遍就重复了。\n'
       + '⚠️ 在别人视频下**发新评论**时，正文里写「@某人」只是纯文字，对方**收不到通知**；要让人真收到就用私信。\n'
-      + '✅ 设置里开着「自动评论并 @ 你」、填了「要 @ 谁」、「每轮最多发几条评论」> 0 时，**直接调就行，不用传 force**。\n'
+      + '✅ 设置里开着「自动评论并 @ 你」、并且填了「要 @ 谁」时，**直接调就行，不用传 force**。\n'
       + '🔴 只有设置没开时才会拒绝；那种情况下要发才传 force: true。',
     parameters: {
       bvid: { type: 'string', description: 'BV号' },
@@ -589,16 +590,14 @@ export function apply(ctx, config) {
       //    （2026-10-21：不加这条的话，dmMode=only 的人永远回不了别人的评论，只能每次手带 force）
       refreshCfg()
       const 是回复 = Math.max(0, Number(args.rpid) || 0) > 0
-      const commentOn = Boolean(cfg.autoComment && cfg.mentionName && cfg.dmMode !== 'only' && Math.max(0, Number(cfg.commentPerRound || 0)) > 0)
+      const commentOn = Boolean(cfg.autoComment && cfg.mentionName && cfg.dmMode !== 'only')
       if (!commentOn && !args.force && !是回复) {
         return {
           ok: false,
           blocked: true,
           hint: cfg.dmMode === 'only'
             ? '现在是「只私信」模式（dmMode=only）—— 规定不发公开评论，改成用 bili_send_message 私信。确实要发时传 force: true。'
-            : (Math.max(0, Number(cfg.commentPerRound || 0)) === 0
-              ? '设置里「每轮最多发几条评论」填的是 0 —— 这一轮按规定不发公开评论。确实要发时传 force: true。'
-              : '要发评论得同时满足三条：开着「自动评论并 @ 你」、填了「要 @ 谁」、且「每轮最多发几条评论」> 0。或者本人当场让你发时传 force: true。'),
+            : '要发评论得满足：开着「自动评论并 @ 你」、并填了「要 @ 谁」。或者本人当场让你发时传 force: true。',
         }
       }
       const r = await call('bili_reply', {
@@ -636,7 +635,7 @@ export function apply(ctx, config) {
       }
       if (!uid) return { ok: false, blocked: true, hint: '没有收件人 UID：在设置里填「私信发给谁」，或调用时传 uid。' }
       // ⭐ 硬约束：这一轮还欠着评论就先别发私信 —— 先调 bili_reply 把评论发了
-      const commentOnNow = Boolean(cfg.autoComment && cfg.mentionName && cfg.dmMode !== 'only' && Math.max(0, Number(cfg.commentPerRound || 0)) > 0)
+      const commentOnNow = Boolean(cfg.autoComment && cfg.mentionName && cfg.dmMode !== 'only')
       // ⭐ 这道闸**故意不看 args.force**：模型会习惯性带 force: true 把它绕过去（2026-10-19 实测 7/7 轮全带）。
       //    评论"调过就算"（成败都清 pendingComment），所以不会把它锁死。
       if (commentOnNow && pendingComment && Date.now() - pendingComment.at < 15 * 60 * 1000) {

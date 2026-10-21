@@ -149,7 +149,6 @@ window.__ModuleLoader__.load({
       const [perDay, setPerDay] = React.useState(null)
       const [gapHours, setGapHours] = React.useState(null)
       const [perScan, setPerScan] = React.useState(null)
-      const [perRound, setPerRound] = React.useState(null)
       const [dmUid, setDmUid] = React.useState(null)        // 私信收件人 UID（本地草稿）
       const [dmMode, setDmMode] = React.useState(null)      // 投递方式：off / only / both
       const [subProvider, setSubProvider] = React.useState(null)   // 派子代理用的 provider
@@ -191,7 +190,6 @@ window.__ModuleLoader__.load({
         if (cfg && perDay === null) setPerDay(String(cfg.perDay ?? 5))
         if (cfg && gapHours === null) setGapHours(String(cfg.gapHours ?? 3))
         if (cfg && perScan === null) setPerScan(String(cfg.perScan ?? 1))
-        if (cfg && perRound === null) setPerRound(String(cfg.commentPerRound ?? 1))
         if (cfg && mention === null) setMention(cfg.mentionName || '')
         if (cfg && dmUid === null) setDmUid(cfg.dmUid ? String(cfg.dmUid) : '')
         if (cfg && dmMode === null) setDmMode(cfg.dmMode || 'off')
@@ -669,17 +667,6 @@ window.__ModuleLoader__.load({
             onChange: (v) => patch({ autoComment: v }, '自动评论'),
           }),
           sw('autoComment') ? h('div', { 'data-bd-sub': '' },
-            h('div', { 'data-bd-row': '' },
-              h('div', { 'data-bd-grow': '' },
-                h('div', { 'data-bd-label': '' }, '每轮最多发几条评论'),
-                h('div', { 'data-bd-note': '' }, '每条评论里 @ 一次下面那个人；填 0 = 这一轮不发评论')),
-              h('input', {
-                'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 0, max: 20,
-                value: perRound ?? '',
-                onChange: (e) => setPerRound(e.target.value),
-                // ⭐ 0 是合法值（= 这一轮不发评论）；范围与 index.js 的 clampPatch 一致（0–20）
-                onBlur: () => { const n = Math.max(0, Math.min(Number(perRound) || 0, 20)); setPerRound(String(n)); patch({ commentPerRound: n }, '每轮几条评论') },
-              })),
             h('div', { 'data-bd-label': '' }, '要 @ 谁（B站 昵称）'),
             h('input', {
               'data-bd-input': '', value: mention ?? '',
