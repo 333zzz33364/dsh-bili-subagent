@@ -962,7 +962,9 @@ export function apply(ctx, config) {
       const 哪 = it.title ? '《' + it.title + '》下面' : '一个视频下面'
       const 啥 = it.kind === 'reply' ? '回了你的评论' : '@ 了你'
       const 话 = String(it.content || '').replace(/\s+/g, ' ').slice(0, 120)
-      return '· ' + 谁 + ' 在' + 哪 + 啥 + '：「' + 话 + '」\n  BV ' + it.bvid
+      // ⚠️ 两个踩过的坑：bvid 自己就带「BV」前缀（原来写成「BV BV1xx」）；
+      //    中文直接拼接会出现「下面@ 了你」（原来漏了空格）
+      return '· ' + 谁 + ' 在' + 哪 + ' ' + 啥 + '：「' + 话 + '」\n  ' + it.bvid
         + '　rpid=' + (it.rpid || 0) + (it.root ? '　root=' + it.root : '')
     }
     // ⭐ 两组分开：**你自己 @ 的，就是要回**；别人回的楼中楼，回不回你定。
