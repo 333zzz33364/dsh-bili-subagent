@@ -14,6 +14,9 @@ B站数据采集 MCP 服务，支持 OpenClaw / Claude Code / Cursor / Cline
 #      ③ 登录成功后凭证**原子写**（先写 .tmp 再 os.replace）
 #      ④ `bili_comments` 把抓取异常带进返回（风控 -412 不再伪装成"这条视频 0 条评论"）
 #      ⑤ `bili_reply` 回执带上 `rpid` / `rpid_str` / `root` / `parent`（判重表与评论复核要用）
+#      ⑥ 收到的 @ / 回复两只工具**把条目整理成统一形状**（带 bvid、昵称、正文、rpid、root），
+#         宿主好直接递给人看 —— 原始 msgfeed 的字段名和 business_id 太绕，别让宿主去猜
+#      ⑦ `bili_reply` 的 `bvid` 参数**也接受纯数字 aid**（通知里常常只有 aid；对外参数名不变）
 import asyncio
 import json
 import base64
@@ -526,6 +529,14 @@ async def bili_reply(bvid: str, text: str, rpid: int = 0, root: int = 0) -> str:
         发表结果
     """
     cred = get_cred()
+    # 纯数字 = aid（消息通知里常常只给 aid）。对外参数名不变，内部转一下。
+    bvid = str(bvid or "").strip()
+    if bvid.isdigit():
+        try:
+            from bilibili_api.utils.aid_bvid_transformer import aid2bvid
+            bvid = str(aid2bvid(int(bvid)))
+        except Exception:
+            pass
     v = video.Video(bvid=bvid, credential=cred)
     info = await v.get_info()
     aid = info["aid"]
@@ -1344,10 +1355,23 @@ async def bili_send_message(receiver_uid: int, text: str) -> str:
             msg_type=session.EventType.TEXT,
             content=text.strip(),
         )
+        # ⭐ 校验「真的投递了」：只凭"没抛异常"就报成功是假的
+        #    （上游 0.1.18 的实测：接口 code=0 但没有 msg_key ⇒ 那条私信根本没出去，
+        #      调用方却显示"已发送"。见 issues #35 / #25）
+        data = result if isinstance(result, dict) else {}
+        msg_key = data.get("msg_key") or data.get("msg_seqno")
+        if isinstance(result, dict) and not msg_key:
+            return json.dumps({
+                "success": False,
+                "error": "接口没报错，但回执里没有 msg_key —— 这条私信大概率没真投递出去",
+                "receiver_uid": receiver_uid,
+                "data": data,
+            }, ensure_ascii=False)
         return json.dumps({
             "success": True,
             "message": f"私信已发送给UID:{receiver_uid}",
-            "data": result if isinstance(result, dict) else str(result),
+            "msg_key": msg_key,
+            "data": data if data else str(result),
         }, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
@@ -1383,8 +1407,8 @@ async def bili_received_replies() -> str:
     """
     cred = get_cred()
     try:
-        result = await session.get_replies(credential=cred)
-        return json.dumps(result, ensure_ascii=False)
+        raw = await session.get_replies(credential=cred)
+        return json.dumps({"items": _norm_feed("reply", raw)}, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
@@ -1402,7 +1426,7 @@ async def bili_received_at_and_likes() -> str:
     cred = get_cred()
     result = {}
     try:
-        result["at"] = await session.get_at(credential=cred)
+        result["items"] = _norm_feed("at", await session.get_at(credential=cred))
     except Exception as e:
         result["at_error"] = str(e)
     try:
@@ -1410,6 +1434,58 @@ async def bili_received_at_and_likes() -> str:
     except Exception as e:
         result["likes_error"] = str(e)
     return json.dumps(result, ensure_ascii=False)
+
+
+# ========== 收到的 @ / 回复：整理成统一形状 ==========
+#
+# 原始 msgfeed 长这样（字段名很不直观）：
+#   {"items":[{"id":..,"user":{"mid":..,"nickname":..},
+#              "item":{"business_id":1,"subject_id":<aid>,"source_id":<评论id>,
+#                      "root_id":<根评论>,"target_reply_id":..,"title":"..","source_content":".."},
+#              "at_time" 或 "reply_time": ..}]}
+# 宿主只需要能看懂的几样：谁、在哪个视频、说了什么、要回哪一条。
+# business_id：1 视频 / 11 / 12 专栏 / 17 动态 —— 这里只处理 1（视频）。
+
+def _bvid_of(aid):
+    """aid 转 bvid；转不了返回空串（不抛异常，别把整条消息搞没）"""
+    try:
+        if not aid:
+            return ""
+        from bilibili_api.utils.aid_bvid_transformer import aid2bvid
+        return str(aid2bvid(int(aid)))
+    except Exception:
+        return ""
+
+
+def _norm_feed(kind, raw):
+    out = []
+    items = raw.get("items") if isinstance(raw, dict) else None
+    if not isinstance(items, list):
+        return out
+    for it in items:
+        try:
+            user = it.get("user") or {}
+            inner = it.get("item") or {}
+            bid = int(inner.get("business_id") or 0)
+            subject = inner.get("subject_id") or 0
+            out.append({
+                "kind": kind,
+                "id": it.get("id"),
+                "mid": user.get("mid"),
+                "nickname": (user.get("nickname") or "").strip(),
+                "business_id": bid,
+                "bvid": _bvid_of(subject) if bid == 1 else "",
+                "aid": subject if bid == 1 else 0,
+                "title": (inner.get("title") or "").strip(),
+                "content": (inner.get("source_content") or "").strip(),
+                # 要回哪一条：source_id = 对方发的那条（parent），root_id = 楼层根（root）
+                "rpid": inner.get("source_id") or 0,
+                "root": inner.get("root_id") or 0,
+                "at": it.get("at_time") or it.get("reply_time") or 0,
+            })
+        except Exception:
+            continue
+    return out
 
 
 # ========== 启动 ==========

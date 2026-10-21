@@ -387,6 +387,18 @@ window.__ModuleLoader__.load({
         setUpBusy(false)
       }
 
+      // 手动看一眼 @ 和回复
+      const onInbox = async () => {
+        setBusy('inbox')
+        try {
+          const r = await jpost('/inbox', {})
+          setMsg((r && (r.hint || ('拿到 ' + (r.count || 0) + ' 条'))) || '看完了')
+        } catch (e) {
+          setMsg('看一眼失败：' + (e && e.message))
+        }
+        setBusy('')
+      }
+
       const sw = (k) => Boolean(cfg[k])
 
       return h('div', { 'data-bd-page': '' },
@@ -482,13 +494,49 @@ window.__ModuleLoader__.load({
         /* ── 自动刷在哪个会话 ── */
         h('div', { 'data-bd-sec': '' },
           h('div', { 'data-bd-h': '' }, '自动刷在哪个会话'),
-          h('div', { 'data-bd-note': '' }, '谷时自动刷的时候，去哪个会话里叫大肥鱼。选你跟她平时聊天的那个就好。'),
+          h('div', { 'data-bd-note': '' }, '谷时自动刷的时候，去哪个会话里叫你的伙伴。选你平时跟它聊天的那个就好。'),
           h('select', {
             'data-bd-input': '', value: targetSession ?? '',
             onChange: (e) => { const v = e.target.value; setTargetSession(v); patch({ targetSession: v }, '自动刷会话') },
           },
             h('option', { value: '' }, '（不选 = 自动挑最近聊过的）'),
             ...((sessions || []).map((s) => h('option', { value: s.id }, s.title + '（' + s.id.slice(0, 14) + '…）'))))),
+
+        /* ── 收到的 @ 和回复 ── */
+        h('div', { 'data-bd-sec': '' },
+          h('div', { 'data-bd-h': '' }, '收到的 @ 和回复'),
+          h('div', { 'data-bd-note': '' }, '每轮刷之前顺手看一眼：有人 @ 了你、或者回了你的评论，就把内容**递给你自己**。回不回、怎么回由你决定 —— 它不替你说话，也不打分。默认只理「私信 UID」那个号。'),
+          h(ToggleRow, {
+            label: '每轮顺手看一眼 @ 和回复',
+            note: '关掉就完全不看（别人的乱 @ 从来不看）',
+            on: Boolean(cfg.inboxOn),
+            onChange: (v) => patch({ inboxOn: v }, '看 @ 和回复'),
+          }),
+          h('div', { 'data-bd-row': '' },
+            h('div', { 'data-bd-grow': '' },
+              h('div', { 'data-bd-label': '' }, '还要理谁（可选）'),
+              h('div', { 'data-bd-note': '' }, '逗号分隔的 UID。留空 = 只理「私信 UID」那个号。')),
+            h('input', {
+              'data-bd-input': '', value: String(cfg.inboxUids ?? ''),
+              placeholder: '比如：12345678,87654321',
+              onChange: (e) => patch({ inboxUids: e.target.value }, '还要理谁'),
+            })),
+          h(ToggleRow, {
+            label: '同一条只提醒一次',
+            note: '开着 = 每条 @ / 回复最多提一次（等于别人最多回 1 条）；关掉 = 没回就再提，直到用完下面的次数',
+            on: Boolean(cfg.inboxOnceOnly),
+            onChange: (v) => patch({ inboxOnceOnly: v }, '同一条只提醒一次'),
+          }),
+          h('div', { 'data-bd-row': '' },
+            h('div', { 'data-bd-grow': '' }, h('div', { 'data-bd-label': '' }, '没回最多提醒几次')),
+            h('input', {
+              'data-bd-input': '', type: 'number', min: 1, max: 10,
+              value: String(cfg.inboxMaxRemind ?? 2),
+              onChange: (e) => patch({ inboxMaxRemind: Math.max(1, Math.min(10, Number(e.target.value) || 2)) }, '提醒次数'),
+            })),
+          h('div', { 'data-bd-row': '' },
+            h('button', { 'data-bd-btn': '', disabled: busy === 'inbox', onClick: onInbox },
+              busy === 'inbox' ? '看…' : '现在就去看一眼'))),
 
         /* ── 提示词（可改） ── */
         h('div', { 'data-bd-sec': '' },
@@ -499,7 +547,7 @@ window.__ModuleLoader__.load({
               h('div', { 'data-bd-label': '' }, '称呼'),
               h('input', {
                 'data-bd-input': '', value: ownerName ?? '',
-                placeholder: '比如：小鱿鱼',
+                placeholder: '比如：小鱼',
                 onChange: (e) => setOwnerName(e.target.value),
                 onBlur: () => patch({ ownerName: String(ownerName || '').trim() || '小鱿鱼' }, '称呼'),
               }))),
