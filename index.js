@@ -927,6 +927,14 @@ export function apply(ctx, config) {
         rec.lastAt = Date.now()
         box.seen[k] = rec
       }
+      // ⭐ 顺手剪枝：只留最近的 300 条。不然 seen 只增不减，一年后是个几万条的 JSON
+      const 条目 = Object.entries(box.seen)
+      if (条目.length > 300) {
+        const 留 = 条目
+          .sort((a, b) => Number((b[1] && b[1].lastAt) || 0) - Number((a[1] && a[1].lastAt) || 0))
+          .slice(0, 300)
+        box.seen = Object.fromEntries(留)
+      }
       writeJson(inboxFile, box)
     } catch (e) { log('收件箱记账失败：' + (e?.message ?? e)) }
   }

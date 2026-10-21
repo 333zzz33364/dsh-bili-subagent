@@ -517,9 +517,11 @@ window.__ModuleLoader__.load({
               h('div', { 'data-bd-label': '' }, '还要理谁（可选）'),
               h('div', { 'data-bd-note': '' }, '逗号分隔的 UID。留空 = 只理「私信 UID」那个号。')),
             h('input', {
-              'data-bd-input': '', value: String(cfg.inboxUids ?? ''),
+              'data-bd-input': '', defaultValue: String(cfg.inboxUids ?? ''),
               placeholder: '比如：12345678,87654321',
-              onChange: (e) => patch({ inboxUids: e.target.value }, '还要理谁'),
+              // ⚠️ 用 defaultValue + onBlur：原来 onChange 每敲一个字就 patch 一次，
+              //    等于每敲一下都写一遍 config.json 和 DSH 设置层（2026-10-21 修）
+              onBlur: (e) => patch({ inboxUids: String(e.target.value || '').trim() }, '还要理谁'),
             })),
           h(ToggleRow, {
             label: '同一条只提醒一次',
@@ -531,8 +533,8 @@ window.__ModuleLoader__.load({
             h('div', { 'data-bd-grow': '' }, h('div', { 'data-bd-label': '' }, '没回最多提醒几次')),
             h('input', {
               'data-bd-input': '', type: 'number', min: 1, max: 10,
-              value: String(cfg.inboxMaxRemind ?? 2),
-              onChange: (e) => patch({ inboxMaxRemind: Math.max(1, Math.min(10, Number(e.target.value) || 2)) }, '提醒次数'),
+              defaultValue: String(cfg.inboxMaxRemind ?? 2),
+              onBlur: (e) => patch({ inboxMaxRemind: Math.max(1, Math.min(10, Number(e.target.value) || 2)) }, '提醒次数'),
             })),
           h('div', { 'data-bd-row': '' },
             h('button', { 'data-bd-btn': '', disabled: busy === 'inbox', onClick: onInbox },
