@@ -169,6 +169,8 @@ window.__ModuleLoader__.load({
       const [login, setLogin] = React.useState(null)
       const [runNote, setRunNote] = React.useState(null)
       const [up, setUp] = React.useState(null)          // 这个插件自己的版本信息
+      const [inboxUids, setInboxUids] = React.useState(null)        // 还要理谁（本地草稿）
+      const [inboxMaxRemind, setInboxMaxRemind] = React.useState(null)  // 没回提醒几次（本地草稿）
       const [upBusy, setUpBusy] = React.useState(false)
       const [report, setReport] = React.useState(null)        // 非 null = 报告已展开   // 顶部那行状态（跑一轮/装依赖的反馈原来在最底下，看不见）
       const [loginState, setLoginState] = React.useState('')
@@ -196,6 +198,8 @@ window.__ModuleLoader__.load({
         if (cfg && subProvider === null) setSubProvider(cfg.subProvider || 'apii')
         if (cfg && subModel === null) setSubModel(cfg.subModel || 'deepseek-v4-pro')
         if (cfg && ownerName === null) setOwnerName(cfg.ownerName || '小鱿鱼')
+        if (cfg && inboxUids === null) setInboxUids(String(cfg.inboxUids || ''))
+        if (cfg && inboxMaxRemind === null) setInboxMaxRemind(String(cfg.inboxMaxRemind ?? 2))
         if (cfg && scanPrompt === null) setScanPrompt(cfg.scanPrompt || '')
         if (cfg && hintPrompt === null) setHintPrompt(cfg.hintPrompt || '')
         if (cfg && triggerPrompt === null) setTriggerPrompt(cfg.triggerPrompt || '')
@@ -512,30 +516,35 @@ window.__ModuleLoader__.load({
             on: Boolean(cfg.inboxOn),
             onChange: (v) => patch({ inboxOn: v }, '看 @ 和回复'),
           }),
-          h('div', { 'data-bd-row': '' },
-            h('div', { 'data-bd-grow': '' },
-              h('div', { 'data-bd-label': '' }, '还要理谁（可选）'),
-              h('div', { 'data-bd-note': '' }, '逗号分隔的 UID。留空 = 只理「私信 UID」那个号。')),
+          // ⚠️ 别把 width:100% 的输入框当 flex 行的兄弟 —— 会把整块挤成竖条（2026-10-21 修）
+          h('div', { 'data-bd-sub': '' },
+            h('div', { 'data-bd-label': '' }, '还要理谁（可选）'),
             h('input', {
-              'data-bd-input': '', defaultValue: String(cfg.inboxUids ?? ''),
+              'data-bd-input': '', value: inboxUids ?? '',
               placeholder: '比如：12345678,87654321',
-              // ⚠️ 用 defaultValue + onBlur：原来 onChange 每敲一个字就 patch 一次，
-              //    等于每敲一下都写一遍 config.json 和 DSH 设置层（2026-10-21 修）
-              onBlur: (e) => patch({ inboxUids: String(e.target.value || '').trim() }, '还要理谁'),
-            })),
+              onChange: (e) => setInboxUids(e.target.value),
+              onBlur: () => patch({ inboxUids: String(inboxUids || '').trim() }, '还要理谁'),
+            }),
+            h('div', { 'data-bd-note': '' }, '逗号分隔的 UID。留空 = 只理「私信 UID」那个号；别人的乱 @ 一律不管。')),
           h(ToggleRow, {
             label: '同一条只提醒一次',
             note: '开着 = 每条 @ / 回复最多提一次（等于别人最多回 1 条）；关掉 = 没回就再提，直到用完下面的次数',
             on: Boolean(cfg.inboxOnceOnly),
             onChange: (v) => patch({ inboxOnceOnly: v }, '同一条只提醒一次'),
           }),
-          h('div', { 'data-bd-row': '' },
-            h('div', { 'data-bd-grow': '' }, h('div', { 'data-bd-label': '' }, '没回最多提醒几次')),
+          h('div', { 'data-bd-sub': '' },
+            h('div', { 'data-bd-label': '' }, '没回最多提醒几次'),
             h('input', {
-              'data-bd-input': '', type: 'number', min: 1, max: 10,
-              defaultValue: String(cfg.inboxMaxRemind ?? 2),
-              onBlur: (e) => patch({ inboxMaxRemind: Math.max(1, Math.min(10, Number(e.target.value) || 2)) }, '提醒次数'),
-            })),
+              'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 1, max: 10,
+              value: inboxMaxRemind ?? '2',
+              onChange: (e) => setInboxMaxRemind(e.target.value),
+              onBlur: () => {
+                const n = Math.max(1, Math.min(10, Number(inboxMaxRemind) || 2))
+                setInboxMaxRemind(String(n))
+                patch({ inboxMaxRemind: n }, '提醒次数')
+              },
+            }),
+            h('div', { 'data-bd-note': '' }, '她一直没回的话，最多再提几次就停（默认 2）。开着「同一条只提醒一次」时，这个数用不上。')),
           h('div', { 'data-bd-row': '' },
             h('button', { 'data-bd-btn': '', disabled: busy === 'inbox', onClick: onInbox },
               busy === 'inbox' ? '看…' : '现在就去看一眼'))),
