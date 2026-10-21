@@ -494,7 +494,7 @@ window.__ModuleLoader__.load({
         /* ── 自动刷在哪个会话 ── */
         h('div', { 'data-bd-sec': '' },
           h('div', { 'data-bd-h': '' }, '自动刷在哪个会话'),
-          h('div', { 'data-bd-note': '' }, '谷时自动刷的时候，去哪个会话里叫你的伙伴。选你平时跟它聊天的那个就好。'),
+          h('div', { 'data-bd-note': '' }, '谷时自动刷的时候，去哪个会话里叫大肥鱼。选你跟她平时聊天的那个就好。'),
           h('select', {
             'data-bd-input': '', value: targetSession ?? '',
             onChange: (e) => { const v = e.target.value; setTargetSession(v); patch({ targetSession: v }, '自动刷会话') },

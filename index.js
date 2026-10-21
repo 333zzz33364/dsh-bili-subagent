@@ -400,7 +400,7 @@ export function apply(ctx, config) {
     const levelLine = level === 'brief'
       ? '\n\n⚠️ 报告形态：**薄** —— 每条只写一两行（标题 + BV号 + 一句值不值得），不要展开细讲。'
       : (level === 'off'
-        ? '\n\n⚠️ 报告形态：**不写详细报告** —— 直接给对方一段简短的口头总结（挑中哪几条、各自一句），不用逐条展开。'
+        ? '\n\n⚠️ 报告形态：**不写详细报告** —— 直接给大肥鱼一段简短的口头总结（挑中哪几条、各自一句），不用逐条展开。'
         : '')
     const prompt = String(cfg.scanPrompt || SCAN_PROMPT_TMPL)
       .split('{owner}').join(owner)
@@ -435,7 +435,7 @@ export function apply(ctx, config) {
     if (result?.stopReason !== 'completed') {
       return { ok: false, error: '子代理没正常跑完（' + (result?.stopReason || '未知') + '）' + (result?.diagnostic ? '：' + result.diagnostic : ''), partial: output }
     }
-    // 投递提示：让伙伴知道接下来要不要发评论/私信（她拿报告后自己决定、自己发）
+    // 投递提示：让大肥鱼知道接下来要不要发评论/私信（她拿报告后自己决定、自己发）
     const commentQuota = Math.max(0, Number(cfg.commentPerRound || 0))
     const commentOn = Boolean(cfg.autoComment && cfg.mentionName && cfg.dmMode !== 'only' && commentQuota > 0)
     if (commentOn) pendingComment = { at: Date.now() }   // 记账：这轮欠一条评论
@@ -472,7 +472,7 @@ export function apply(ctx, config) {
   tool({
     name: 'bili_scan',
     description: '派一个子代理去刷 B 站：按你想看的方向搜视频、读字幕原文、把值得的挑出来，看完把内容汇报给你。\n'
-      + '对方（或你）说「帮我刷下 XX 方向」就能触发；子代理模型可在设置页选。',
+      + '大肥鱼（或你）说「帮我刷下 XX 方向」就能触发；子代理模型可在设置页选。',
     parameters: {
       direction: { type: 'string', description: '想刷什么方向 / 主题 / 关键词，一句话或几个词' },
     },
@@ -618,7 +618,7 @@ export function apply(ctx, config) {
 
   tool({
     name: 'bili_send_message',
-    description: '给某人发 B 站私信（把这一轮刷到的好东西私信过去）。用于「只私信 / 评论+私信」模式，让伙伴亲自把结果私下递过去。\n'
+    description: '给某人发 B 站私信（把这一轮刷到的好东西私信给他）。用于「只私信 / 评论+私信」模式，让大肥鱼亲自把结果私下递过去。\n'
       + '🔴 安全闸：设置里「投递方式」得不是 off、且填了私信 UID，否则拒绝（本人当场让你发时传 force: true）。\n'
       + '⚠️ 私信是写给「人」看的：干净的人话，别出现设置名/内部术语；实测 500 字符就顶，别太长。',
     parameters: {
