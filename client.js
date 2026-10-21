@@ -144,7 +144,6 @@ window.__ModuleLoader__.load({
       const [msg, setMsg] = React.useState('')
       const [msgTone, setMsgTone] = React.useState('')
       const [rl, setRl] = React.useState(null)
-      const [newVer, setNewVer] = React.useState('')       // 发现的新版本号（空 = 没发现）          // 日报形态：full / brief / off
       // ⚠️ 输入框必须绑"本地草稿"：页面每 5 秒轮询 /status，服务端那份会把 config 盖掉
       //    ⇒ 直接绑 cfg 的话，用户打字打到一半就被冲没了 ✗（2026-10-14 陌生人验收时抓到）
       const [perDay, setPerDay] = React.useState(null)
@@ -288,21 +287,6 @@ window.__ModuleLoader__.load({
           const r = await jpost('/upgrade', {})
           // 原来这两句分两次 say，第二句把服务端的 hint 冲掉了 —— 合成一句。（2026-10-16 审查修）
           say(((r && r.hint) || '正在升级') + ' —— 升级过程写在下面的「主依赖的日志」里；完了记得重启一次 dsh（不重启还是旧版）', 'warn')
-        } catch (e) { say(String(e?.message ?? e), 'warn') } finally { setBusy('') }
-      }
-
-      const onCheckUpdate = async () => {
-        setBusy('update')
-        try {
-          const r = await jget('/update')
-          if (r && r.ok && r.latest) {
-            if (r.hasNew) {
-              setNewVer(r.latest)
-              say('有新版 v' + r.latest + '（你的是 v' + r.current + '）—— 点右边的「一键升级」，完了重启一次 dsh', 'warn')
-            } else say('已经是最新版 v' + r.current, 'good')
-          } else {
-            say('查不到最新版（可能网络不通）—— 你现在的版本是 v' + ((r && r.current) || '?'))
-          }
         } catch (e) { say(String(e?.message ?? e), 'warn') } finally { setBusy('') }
       }
 

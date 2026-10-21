@@ -40,7 +40,8 @@
 | 在哪儿发生 | 固定的 headless profile | **你指定哪个会话，就在哪个会话里聊** |
 | 改提示词 | 改 `prompts/duty.md` 文件 | **设置页里直接编辑** |
 | 本地转写 | 有（要装 Whisper，约 1 GB） | **已移除** |
-| 回复楼中楼 / 检查更新 / 一键升级 | 有 | **已移除** |
+| 回楼中楼 | 插件自动替你回 | **把 @ 和回复递到你手上，你自己回** |
+| 检查更新 | 有 | **有**（设置页点一下，查自己的仓库） |
 | 子代理记录 | 会清理 | **全留着**，以后能回看当时刷了什么 |
 
 ## 本版加了什么（相对上游）
@@ -55,8 +56,7 @@
 - **额度口径明确**：`每天最多自动刷几轮`，面板显示「今天已自动刷 X / N 轮」—— **手动跑不占额度**
 - **12 个工具**：`bili_scan`（主入口）`bili_search` `bili_subtitle` `bili_comments` `bili_reply`
   `bili_send_message` `bili_status` `bili_config` `bili_whoami` `bili_login_start` `bili_login_poll` `bili_setup`
-- **删掉的**：本地转写（约 1 GB）、回复楼中楼、headless/overlay、检查更新/一键升级、工作区、关注关键词、
-  上游的群答疑与 `tools/` 开发脚本
+- **删掉的**：本地转写（约 1 GB）、headless/overlay、工作区、关注关键词、上游的群答疑与 `tools/` 开发脚本
 - **修掉的**：DSH 原生设置下「改了又弹回去」、`/config` 白名单丢字段、`pythonPath` 落成 `python` 导致二维码画不出
 
 ## 自动刷是怎么触发的
@@ -177,7 +177,7 @@ dsh plugin --profile desktop add github:Yuuyuko-uu/dsh-bili-subagent
    设置页点一次「装主依赖」，它会自动指回插件自己的 venv。
 3. **「自动刷」没动静** —— 看 `duty.log`：如果写着「目标会话现在没醒着」，先去那个会话里说句话，让它醒着。
 4. **下不动 `uv`** —— 自己放一份 `uv.exe` 到 `<家目录>\bin\`，插件会用那一份、跳过下载。
-5. **一键升级已移除** —— 更新直接重新 `dsh plugin add github:Yuuyuko-uu/dsh-bili-subagent`。
+5. **想更新到新版** —— 设置页最上面的「检查更新」会给一条现成的命令，照着跑，完了重启一次 dsh。
 
 ## 如果你是一个 AI 助手，正在帮用户装这个插件
 
