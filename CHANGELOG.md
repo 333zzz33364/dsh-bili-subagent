@@ -1,3 +1,18 @@
+## 0.3.8 — 2026-10-21
+
+**修 0.3.6 留下的回归：`bili_scan` 直接报 `commentQuota is not defined`**
+
+- 🔴 0.3.6 把「每轮最多发几条评论」这个设置项去掉时，我**顺手把它旁边那行 `commentQuota` 的定义删了**，
+  可下面拼投递提示时还在用它两处（「评论块」文案里 + `{commentQuota}` 占位符）⇒
+  **任何一次 `bili_scan` 都会抛 ReferenceError，刷不起来**（用户实测报来）。
+- ✅ 把 `const commentQuota = Math.max(0, Number(cfg.commentPerRound ?? 1))` 补回来。
+  这个数现在**只是文案里用一下**，不再参与任何判断（闸早就改成只看
+  「开着自动评论 + 填了要 @ 谁 + 不是只私信」三条）。
+- ⚠️ 教训：删一个设置项时，要连同**它引出的所有变量**一起 grep —— 我上次只搜了 `commentPerRound`，
+  没搜 `commentQuota`，于是漏了。已在 `_check_bili_patches.mjs` 里加一道断言，防止再犯。
+
+---
+
 ## 0.3.7 — 2026-10-21
 
 **改掉两处「让你自己回」的措辞（回的人是伙伴，不是使用者）**

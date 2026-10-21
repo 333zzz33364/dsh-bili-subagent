@@ -440,6 +440,10 @@ export function apply(ctx, config) {
     // ⚠️ 「每轮最多发几条评论」这个设置项已经去掉（上游用来管自动评论额度，被收件箱取代）。
     //    闸只看：开着自动评论 + 填了要 @ 谁 + 不是「只私信」模式
     const commentOn = Boolean(cfg.autoComment && cfg.mentionName && cfg.dmMode !== 'only')
+    // ⚠️ 这个数现在**没有设置项了**（「每轮最多发几条评论」已从设置页去掉，额度概念被收件箱取代），
+    //    但下面拼「评论块」和 {commentQuota} 占位符时还在用它 ⇒ 必须定义，否则整条 bili_scan 直接抛
+    //    ReferenceError（2026-10-21 用户实测：自动评论关着时刷不起来，就是这个）
+    const commentQuota = Math.max(0, Number(cfg.commentPerRound ?? 1))
     if (commentOn) pendingComment = { at: Date.now() }   // 记账：这轮欠一条评论
     const dmOn = Boolean(cfg.dmMode !== 'off' && Number(cfg.dmUid) > 0)
     const 评论块 = '· **评论区 @（公开！除了 ' + owner + '，别人也看得到）**：这是**发**评论——必须用 `bili_reply` 工具真发一条，**不是**用 `bili_comment` 去读评论（读评论是子代理已经干过的事，跟这一步无关）。**设置里已经开着，直接调 bili_reply 就行，不用传 force**。最多发 ' + commentQuota + ' 条，内容**极短**：只点一个最有意思的点/梗，然后 @ ' + cfg.mentionName + '，勾她去看。别写长、别写私密的话（大家都能看到）。'
