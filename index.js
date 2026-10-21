@@ -400,7 +400,7 @@ export function apply(ctx, config) {
     const levelLine = level === 'brief'
       ? '\n\n⚠️ 报告形态：**薄** —— 每条只写一两行（标题 + BV号 + 一句值不值得），不要展开细讲。'
       : (level === 'off'
-        ? '\n\n⚠️ 报告形态：**不写详细报告** —— 直接给大肥鱼一段简短的口头总结（挑中哪几条、各自一句），不用逐条展开。'
+        ? '\n\n⚠️ 报告形态：**不写详细报告** —— 直接给对方一段简短的口头总结（挑中哪几条、各自一句），不用逐条展开。'
         : '')
     const prompt = String(cfg.scanPrompt || SCAN_PROMPT_TMPL)
       .split('{owner}').join(owner)
@@ -435,7 +435,7 @@ export function apply(ctx, config) {
     if (result?.stopReason !== 'completed') {
       return { ok: false, error: '子代理没正常跑完（' + (result?.stopReason || '未知') + '）' + (result?.diagnostic ? '：' + result.diagnostic : ''), partial: output }
     }
-    // 投递提示：让大肥鱼知道接下来要不要发评论/私信（她拿报告后自己决定、自己发）
+    // 投递提示：让伙伴知道接下来要不要发评论/私信（她拿报告后自己决定、自己发）
     const commentQuota = Math.max(0, Number(cfg.commentPerRound || 0))
     const commentOn = Boolean(cfg.autoComment && cfg.mentionName && cfg.dmMode !== 'only' && commentQuota > 0)
     if (commentOn) pendingComment = { at: Date.now() }   // 记账：这轮欠一条评论
@@ -472,7 +472,7 @@ export function apply(ctx, config) {
   tool({
     name: 'bili_scan',
     description: '派一个子代理去刷 B 站：按你想看的方向搜视频、读字幕原文、把值得的挑出来，看完把内容汇报给你。\n'
-      + '大肥鱼（或你）说「帮我刷下 XX 方向」就能触发；子代理模型可在设置页选。',
+      + '对方（或你）说「帮我刷下 XX 方向」就能触发；子代理模型可在设置页选。',
     parameters: {
       direction: { type: 'string', description: '想刷什么方向 / 主题 / 关键词，一句话或几个词' },
     },
@@ -551,8 +551,7 @@ export function apply(ctx, config) {
 
   tool({
     name: 'bili_subtitle',
-    description: '取一个视频的字幕（AI 字幕）全文。**判断内容就靠它** —— 没有字幕时，'
-      + '没有字幕的直接跳过这条。',
+    description: '取一个视频的字幕（AI 字幕）全文。**判断内容就靠它** —— 没有字幕的，直接跳过这条。',
     parameters: { bvid: { type: 'string', description: 'BV号' } },
     async execute(args) { return call('bili_subtitle', { bvid: String(args.bvid ?? '') }) },
   })
@@ -571,21 +570,26 @@ export function apply(ctx, config) {
 
   tool({
     name: 'bili_reply',
-    description: '在视频下发一条评论（或回复某条评论）。这就是"@ 那个人"那一下：短、干净、纯文本 @ 写在正文里。\n'
+    description: '在视频下发一条评论，或回复某条评论（楼中楼）。短、干净、像人说的话。\n'
+      + '⚠️ 回复别人的评论时**正文里不要手打 @** —— B站会自己加「回复 @某某」，你再加一遍就重复了。\n'
+      + '⚠️ 在别人视频下**发新评论**时，正文里写「@某人」只是纯文字，对方**收不到通知**；要让人真收到就用私信。\n'
       + '✅ 设置里开着「自动评论并 @ 你」、填了「要 @ 谁」、「每轮最多发几条评论」> 0 时，**直接调就行，不用传 force**。\n'
       + '🔴 只有设置没开时才会拒绝；那种情况下要发才传 force: true。',
     parameters: {
       bvid: { type: 'string', description: 'BV号' },
       text: { type: 'string', description: '评论正文（短、干净、纯文本 @；别写敏感词）' },
-      rpid: { type: 'number', description: '要回复的评论 id（0/不填 = 发新评论）' },
+      rpid: { type: 'number', description: '要回复的评论 id（0/不填 = 发新评论）。带了 rpid 就是"回别人"，**不受自动评论那套闸限制**' },
       root: { type: 'number', description: '楼中楼才填：楼层根评论 id（回复一级评论不用填）。正文里**不要**手打 @，B站会自己加「回复 @某某」' },
       force: { type: 'boolean', description: '本人当场让你发的，传 true 越过"自动评论关着"的闸' },
     },
     async execute(args) {
       // dmMode==='only' 时本轮根本不该发公开评论；「每轮最多发几条评论」填 0 也一条都不发 —— 工具层一并挡掉（除非当场 force）
+      // ⭐ 但**带 rpid 的回复（楼中楼）不走这套闸**：那是在回别人说的话，不是「自动发评论去 @ 谁」。
+      //    （2026-10-21：不加这条的话，dmMode=only 的人永远回不了别人的评论，只能每次手带 force）
       refreshCfg()
+      const 是回复 = Math.max(0, Number(args.rpid) || 0) > 0
       const commentOn = Boolean(cfg.autoComment && cfg.mentionName && cfg.dmMode !== 'only' && Math.max(0, Number(cfg.commentPerRound || 0)) > 0)
-      if (!commentOn && !args.force) {
+      if (!commentOn && !args.force && !是回复) {
         return {
           ok: false,
           blocked: true,
@@ -614,7 +618,7 @@ export function apply(ctx, config) {
 
   tool({
     name: 'bili_send_message',
-    description: '给某人发 B 站私信（把这一轮刷到的好东西私信给他）。用于「只私信 / 评论+私信」模式，让大肥鱼亲自把结果私下递过去。\n'
+    description: '给某人发 B 站私信（把这一轮刷到的好东西私信过去）。用于「只私信 / 评论+私信」模式，让伙伴亲自把结果私下递过去。\n'
       + '🔴 安全闸：设置里「投递方式」得不是 off、且填了私信 UID，否则拒绝（本人当场让你发时传 force: true）。\n'
       + '⚠️ 私信是写给「人」看的：干净的人话，别出现设置名/内部术语；实测 500 字符就顶，别太长。',
     parameters: {
@@ -717,7 +721,8 @@ export function apply(ctx, config) {
     name: 'bili_config',
     description: '读 / 改「刷B站」的设置。不给 `patch` 就是读；给了就改（只认 schema 里的字段）。\n'
       + '例：`{"perDay":5,"peakValley":true,"noon":true,"night":true,"autoComment":false,"perScan":1}`；'
-      + '私信投递：`{"dmMode":"only","dmUid":12345678}`（dmMode = off / only / both）。',
+      + '私信投递：`{"dmMode":"only","dmUid":12345678}`（dmMode = off / only / both）；'
+      + '看 @ 和回复：`{"inboxOn":true,"inboxOnceOnly":true,"inboxMaxRemind":2}`。',
     parameters: { patch: { type: 'object', additionalProperties: true, description: '要改的字段（可省）' } },
     async execute(args) {
       let host = null
@@ -905,13 +910,25 @@ export function apply(ctx, config) {
       if (rec.replied) continue                              // 回过了就不再提
       if (cfg.inboxOnceOnly && rec.n >= 1) continue           // 「同一条只提醒一次」
       if (rec.n >= Math.max(1, Number(cfg.inboxMaxRemind || 2))) continue
-      rec.n += 1
-      rec.lastAt = Date.now()
-      box.seen[k] = rec
       out.push(it)
     }
-    writeJson(inboxFile, box)
     return out
+  }
+
+  /** 真的递出去了才记账 —— 没递成功就不算提醒过，下次还会提 */
+  function commitInbox(items) {
+    try {
+      const box = readJson(inboxFile, { seen: {} })
+      if (!box.seen || typeof box.seen !== 'object') box.seen = {}
+      for (const it of items) {
+        const k = 收件键(it)
+        const rec = box.seen[k] || { n: 0, replied: false }
+        rec.n = Number(rec.n || 0) + 1
+        rec.lastAt = Date.now()
+        box.seen[k] = rec
+      }
+      writeJson(inboxFile, box)
+    } catch (e) { log('收件箱记账失败：' + (e?.message ?? e)) }
   }
 
   /** 她用 bili_reply 回完之后，把那个视频下待处理的都标成已回 */
@@ -931,18 +948,27 @@ export function apply(ctx, config) {
 
   /** 拼成一段人话（不是指令）—— 里面带 rpid / root，她用 bili_reply 回的时候要用 */
   function renderInbox(items) {
-    const lines = items.map((it) => {
+    const 自己 = Number(cfg.dmUid || 0)
+    const 行 = (it) => {
       const 谁 = it.nickname || ('UID ' + it.mid)
       const 哪 = it.title ? '《' + it.title + '》下面' : '一个视频下面'
       const 啥 = it.kind === 'reply' ? '回了你的评论' : '@ 了你'
       const 话 = String(it.content || '').replace(/\s+/g, ' ').slice(0, 120)
       return '· ' + 谁 + ' 在' + 哪 + 啥 + '：「' + 话 + '」\n  BV ' + it.bvid
         + '　rpid=' + (it.rpid || 0) + (it.root ? '　root=' + it.root : '')
-    })
-    return '〔有人找你〕\n' + lines.join('\n')
+    }
+    // ⭐ 两组分开：**你自己 @ 的，就是要回**；别人回的楼中楼，回不回你定。
+    //    （一开始笼统写了"都不必回"，主次被抹平了 —— 2026-10-21 纠正）
+    const 我的 = items.filter((it) => Number(it.mid || 0) === 自己)
+    const 别人 = items.filter((it) => Number(it.mid || 0) !== 自己)
+    const 段 = []
+    if (我的.length) 段.push('〔' + (cfg.ownerName || '你') + ' 找你了 —— 这些要回〕\n' + 我的.map(行).join('\n'))
+    if (别人.length) 段.push('〔别人回了你的评论 —— 想回就回〕\n' + 别人.map(行).join('\n'))
+    段.push('回的时候：正文里**不要**手打 @，B站会自己加「回复 @某某」；楼中楼记得带 root。')
+    return 段.join('\n\n')
   }
 
-  const triggerFeiyuScan = async (why, extra) => {
+    const triggerFeiyuScan = async (why, extra) => {
     let target = String(cfg.targetSession || '').trim()
     if (!target) target = pickRecentSession()          // 没选 → 最近聊过的那个
     let agent = null
@@ -1007,14 +1033,20 @@ export function apply(ctx, config) {
         bumpState({ windows: { ...(st.windows || {}), [key]: true }, count: rounds, picked: rounds, lastRunAt: now.toISOString(), lastWhy: k })
         Promise.resolve((async () => {
           let extra = ''
+          let box = []
           try {
-            const box = await pickInbox()
+            box = await pickInbox()
             if (box.length) {
               extra = renderInbox(box)
               log('收件箱：这一轮递过去 ' + box.length + ' 条（@ / 回复）')
             }
           } catch (e) { log('收件箱：这一轮拉取失败 ' + (e?.message ?? e)) }
-          return triggerFeiyuScan(`window:${k}`, extra)
+          let sent = false
+          try {
+            sent = await triggerFeiyuScan(`window:${k}`, extra)
+            if (sent && box.length) commitInbox(box)   // 真递出去了才记账
+          } catch (e) { log('收件箱：投递异常 ' + (e?.message ?? e)) }
+          return sent
         })())
           .then((ok) => {
             // ⭐ 没投出去（目标会话没醒着之类）⇒ 把额度和间隔都退回去，下个周期还能重试
@@ -1296,6 +1328,7 @@ export function apply(ctx, config) {
         if (!box.length) return sendJson(res, 200, { ok: true, count: 0, hint: '这会儿没有要转给你的 @ 或回复（或者都已经回过 / 提醒过上限了）' })
         const text = renderInbox(box)
         const sent = await triggerFeiyuScan('inbox', text)
+        if (sent) commitInbox(box)
         log('收件箱（手动）：' + box.length + ' 条，投递' + (sent ? '成功' : '失败'))
         return sendJson(res, 200, {
           ok: true, count: box.length, sent,
