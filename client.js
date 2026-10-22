@@ -255,7 +255,7 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
       React.useEffect(() => {
         let 活 = true
         jget('/cards')
-          .then((r) => { if (!活) return; 卡缓存 = (r && r.cards) || []; 画卡('all') })
+          .then((r) => { if (!活) return; 卡缓存 = (r && r.cards) || []; 画卡() })
           .catch(() => {})
         return () => { 活 = false }
       }, [])
@@ -263,17 +263,12 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
       // ⭐ 卡片墙：拿到的卡片先存着，筛的时候只重画不重拉（2026-10-22）
       let 卡缓存 = []
       const 转义 = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-      const 画卡 = (档) => {
+      const 画卡 = () => {
         const box = document.getElementById('bd-cards')
         if (!box) return
-        const 选 = (!档 || 档 === 'all') ? 卡缓存 : 卡缓存.filter((c) => String(c['档'] || '') === 档)
+        const 选 = 卡缓存
         if (!选.length) {
-          const 有档的 = 卡缓存.filter((c) => c['档']).length
-          box.textContent = !卡缓存.length
-            ? '还没有笔记 —— 跑一轮之后就有了'
-            : (有档的 === 0
-              ? ('现有 ' + 卡缓存.length + ' 条笔记还没标档位 —— 下一轮刷完就有了')
-              : ('这一档没有卡片（共 ' + 卡缓存.length + ' 条，其中 ' + 有档的 + ' 条标了档位）'))
+          box.textContent = '还没有看过视频 —— 刷过一轮之后就有了'
           return
         }
         // 设置页里用**小缩略图**（她说这样看得清楚，也不挤）
@@ -284,13 +279,11 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
           return '<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid rgba(127,127,127,.15)">'
             + 图
             + '<div style="min-width:0;font-size:12px;line-height:1.5">'
-            + '<div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + 转义(c.title || '(没标题)') + '</div>'
-            + '<div style="opacity:.65">' + 转义(c.date || '') + '　' + 转义(c.bvid) + (c['档'] ? '　【' + 转义(c['档']) + '】' : '') + '</div>'
-            + (c.why ? '<div style="opacity:.8">' + 转义(c.why) + '</div>' : '')
+            + ((c.title || '') ? '<div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + 转义(c.title) + '</div>' : '')
+            + '<div style="opacity:.65">' + 转义(c.date || '') + '　' + 转义(c.bvid) + '</div>'
             + '</div></div>'
         })
-        box.innerHTML = '<div style="font-size:12px;opacity:.65;margin-bottom:4px">共 ' + 选.length + ' 条'
-          + (档 && 档 !== 'all' ? '（' + 转义(档) + '）' : '') + '</div>' + 块们.join('')
+        box.innerHTML = '<div style="font-size:12px;opacity:.65;margin-bottom:4px">共 ' + 选.length + ' 条</div>' + 块们.join('')
       }
 
       const patch = async (p, what) => {
@@ -589,7 +582,7 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
         /* ── 刷过的视频（卡片墙） ── */
         h('div', { 'data-bd-sec': '', 'data-bd-in': 'cards' },
           h('div', { 'data-bd-h': '' }, '刷过的视频'),
-          h('div', { 'data-bd-note': '' }, '每条视频一份笔记（`reports/<BV>-<日期>.md`）。这里按**子代理标的档位**筛；以后还能查「这条看过没、当时怎么说的」。'),
+          h('div', { 'data-bd-note': '' }, '看过哪些视频就在这儿，按天排。每条视频一份笔记（`reports/<BV>-<日期>.md`），以后还能查「这条看过没、当时怎么说的」。'),
           h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', margin: '4px 0 8px' } },
             h('button', {
               'data-bd-btn': '',
@@ -599,14 +592,12 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
                 try {
                   const r = await jget('/cards')
                   卡缓存 = (r && r.cards) || []
-                  画卡('all')
+                  画卡()
                 } catch (e) {
                   if (box) box.innerText = '读不出来：' + ((e && e.message) || e)
                 }
               },
-            }, '刷新'),
-            ...[['all', '全部'], ['值得看', '值得看'], ['可以看', '可以看'], ['不值当', '不值当']].map(([k, 名]) =>
-              h('button', { key: k, 'data-bd-btn': '', onClick: () => 画卡(k) }, 名))),
+            }, '刷新')),
           h('div', { id: 'bd-cards', 'data-bd-note': '', style: { whiteSpace: 'pre-wrap', lineHeight: '1.8', marginTop: '8px' } })),
 
         /* ── 三连 ── */
@@ -913,7 +904,6 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
     //    这里用官方的 conversation.view 座位（跟「聊天 / 轨迹」并列的一个视图）。
     const 卡墙 = () => {
       const [list, setList] = React.useState(null)
-      const [档, set档] = React.useState('all')
       const [页, set页] = React.useState(0)
       const 每页 = 12
       React.useEffect(() => {
@@ -925,11 +915,9 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
         return () => { 活 = false }
       }, [])
       const 全 = list || []
-      const 选 = 档 === 'all' ? 全 : 全.filter((c) => String(c['档'] || '') === 档)
-      const 页们 = Math.max(1, Math.ceil(选.length / 每页))
+      const 页们 = Math.max(1, Math.ceil(全.length / 每页))
       const 当前 = Math.min(页, 页们 - 1)
-      const 这页 = 选.slice(当前 * 每页, 当前 * 每页 + 每页)
-      const 换 = (k) => { set档(k); set页(0) }
+      const 这页 = 全.slice(当前 * 每页, 当前 * 每页 + 每页)
       // ⭐ 按天分组（2026-10-22）：日期当小标题，同一天的合在一起，中间一条分割线
       const 按天 = []
       for (const c of 这页) {
@@ -948,18 +936,14 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
           style: { width: '100%', aspectRatio: '16 / 9', objectFit: 'cover', display: 'block' },
         }) : null,
         h('div', { style: { padding: '8px 10px 10px' } },
-          h('div', { style: { fontWeight: 600, margin: '0 0 4px', lineHeight: 1.45 } }, c.title || '(没标题)'),
-          h('div', { style: { fontSize: '12px', opacity: 0.65 } }, c.bvid + (c['档'] ? '　【' + c['档'] + '】' : '')),
-          c.why ? h('div', { style: { fontSize: '12px', opacity: 0.8, lineHeight: 1.55, marginTop: '4px' } }, c.why) : null))
+          c.title ? h('div', { style: { fontWeight: 600, margin: '0 0 4px', lineHeight: 1.45 } }, c.title) : null,
+          h('div', { style: { fontSize: '12px', opacity: 0.65 } }, c.bvid)))
 
       let 内容 = null
       if (list === null) {
         内容 = h('div', { 'data-bd-note': '' }, '读取中…')
       } else if (!这页.length) {
-        const 有档 = 全.filter((c) => c['档']).length
-        内容 = h('div', { 'data-bd-note': '' },
-          !全.length ? '还没有笔记 —— 跑一轮之后就有了'
-            : (有档 === 0 ? ('现有 ' + 全.length + ' 条笔记还没标档位 —— 下一轮刷完就有了') : '这一档没有卡片'))
+        内容 = h('div', { 'data-bd-note': '' }, '还没有看过视频 —— 刷过一轮之后就有了')
       } else {
         内容 = h('div', {},
           ...按天.map((g, gi) => h('div', { key: g.d + gi },
@@ -981,9 +965,7 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
       return h('div', { style: { padding: '14px 16px', overflow: 'auto', height: '100%' } },
         h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '10px' } },
           h('div', { style: { fontWeight: 700, fontSize: '15px' } }, '刷过的视频'),
-          h('div', { style: { opacity: 0.6, fontSize: '12px' } }, '共 ' + 全.length + ' 条'),
-          ...[['all', '全部'], ['值得看', '值得看'], ['可以看', '可以看'], ['不值当', '不值当']].map(([k, 名]) =>
-            h('button', { key: k, 'data-bd-btn': '', style: 档 === k ? { fontWeight: 700 } : { opacity: 0.6 }, onClick: () => 换(k) }, 名))),
+          h('div', { style: { opacity: 0.6, fontSize: '12px' } }, '共 ' + 全.length + ' 条')),
         内容,
         翻页)
     }

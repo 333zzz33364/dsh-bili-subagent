@@ -57,7 +57,7 @@ const WATCH_TMPL = '去看这一条视频：{bvid}\n\n'
   + '按这个来：先把它的字幕读一遍（没字幕就翻评论区、看简介），弄清楚它到底讲了什么；\n'
   + '再翻翻评论区，看大家真实在说什么。\n\n'
   + '回来就跟我说这几件：① 它讲了什么（两三句，别复述全文）② 值不值得看、为什么 ③ 评论区什么反应。\n'
-  + '⚠️ 每条第一行写「### {bvid}」，方便我统计。\n'
+  + '⚠️ 第一行写「### {bvid}」，第二行单独写「**标题**：<这条视频的标题>」，方便我统计。\n'
   + '看完把报告交给我就行 —— 发不发评论、发不发私信，我自己来。'
 
 const TRIGGER_TMPL = '（到谷时啦，去 B 站刷一轮吧～想看什么方向你自己定，用 bili_scan 就行；刷完按设置，该发评论发评论、该发私信发私信。）'
@@ -584,20 +584,22 @@ export function apply(ctx, config) {
             const m = /^(BV[0-9A-Za-z]{10})/.exec(段.trim())
             if (!m) continue
             const 路径 = join(笔记夹, m[1] + '-' + dayKey(new Date()) + '.md')
-            // ⭐ 顺手取封面地址（B站 公开接口，不用登录）；取不到就留空，不影响笔记
-            // ⚠️ 2026-10-22：档位也从正文里抠出来存进笔记头 —— 卡片页只读头，不去猜正文
-            const 档 = (/档位[：:]\s*(值得看|可以看|不值当)/.exec(段) || [])[1] || ''
+            // ⭐ 顺手取标题 + 封面（B站 公开接口，不用登录）；取不到就留空，不影响笔记
+            //    2026-10-22：标题以前靠正文里有没有「**标题**：」—— 定点看一条那类报告不写，
+            //    卡片就成了「(没标题)」。现在直接从接口拿真标题写进笔记头，怎么都补得上。
             let 封面 = ''
+            let 标题 = ''
             try {
               const vr = await fetch('https://api.bilibili.com/x/web-interface/view?bvid=' + m[1])
               const vj = await vr.json()
               封面 = String((vj && vj.data && vj.data.pic) || '')
+              标题 = String((vj && vj.data && vj.data.title) || '')
             } catch (e) {}
             try {
               writeFileSync(路径, '# ' + m[1] + String.fromCharCode(10, 10)
                 + '> 抓取时间：' + new Date().toISOString() + String.fromCharCode(10)
                 + '> 来源：自动刷 B 站第 ' + (Number(st.count) || 0) + ' 轮' + String.fromCharCode(10)
-                + (档 ? '> 档位：' + 档 + String.fromCharCode(10) : '')
+                + (标题 ? '> 标题：' + 标题.split(String.fromCharCode(10)).join(' ') + String.fromCharCode(10) : '')
                 + (封面 ? '> 封面：' + 封面 + String.fromCharCode(10) : '') + String.fromCharCode(10)
                 + '### ' + 段.trim() + String.fromCharCode(10), 'utf8')
             } catch (e) {}
@@ -1705,19 +1707,16 @@ export function apply(ctx, config) {
           if (!m) continue
           let text = ''
           try { text = readFileSync(join(夹, f), 'utf8') } catch (e) {}
-          // ⚠️ 2026-10-22 修：原来抓的是笔记头里「> 抓取时间」那一行（所以卡片上显示的是时间）。
-          //    真实标题在正文的「**标题**：…」那一行。
-          const 标题 = (/^\*\*标题\*\*[：:]\s*(.+)$/m.exec(text) || [])[1]
-            || (/^#\s+\S*BV\S*\s*\n(?:>[^\n]*\n)*\n*###[^\n]*\n+\*\*[^*]*\*\*[：:]\s*(.+)$/m.exec(text) || [])[1]
+          // ⭐ 标题：先读笔记头那条（B站 接口给的真标题），再退回正文里的「**标题**：」；
+          //    都没有就留空 —— 卡片上就不显示标题，绝不显示「(没标题)」这种占位。
+          const 标题 = (/^>\s*标题：(.+)$/m.exec(text) || [])[1]
+            || (/^\*\*标题\*\*[：:]\s*(.+)$/m.exec(text) || [])[1]
             || ''
-          const 档 = (/^>\s*档位：\s*(值得看|可以看|不值当)/m.exec(text) || [])[1]
-            || (/档位[：:]\s*(值得看|可以看|不值当)/.exec(text) || [])[1] || ''
           const 封面 = (/^>\s*封面：(\S+)/m.exec(text) || [])[1] || ''
-          const 为什么 = (/为什么值得[：:]\s*([^\n]+)/.exec(text) || [])[1] || ''
           cards.push({
             bvid: m[1], date: m[2], file: f,
             title: 标题.replace(/^#+\s*/, '').trim().slice(0, 80),
-            档: 档, why: 为什么.trim().slice(0, 200), cover: 封面,
+            cover: 封面,
           })
         }
       } catch (e) {}
