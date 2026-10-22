@@ -557,9 +557,28 @@ export function apply(ctx, config) {
 
   tool({
     name: 'bili_subtitle',
-    description: '取一个视频的字幕（AI 字幕）全文。**判断内容就靠它** —— 没有字幕的，直接跳过这条。',
-    parameters: { bvid: { type: 'string', description: 'BV号' } },
-    async execute(args) { return call('bili_subtitle', { bvid: String(args.bvid ?? '') }) },
+    description: '取一个视频的字幕（AI 字幕）。**判断内容就靠它** —— 没有字幕的，直接跳过这条。\n'
+      + '⚠️ 默认只回前 2500 字（够判断了）；**要全文才传 maxChars: 0**。\n'
+      + '⚠️ 别在主会话里拉长字幕全文 —— 一段字幕动辄上万字，会长期占着上下文，之后被剪枝时还要付一次全量重读。',
+    parameters: {
+      bvid: { type: 'string', description: 'BV号' },
+      maxChars: { type: 'number', description: '最多回多少字（默认 2500；0 = 全文，不截断）' },
+    },
+    async execute(args) {
+      const raw = await call('bili_subtitle', { bvid: String(args.bvid ?? '') })
+      const cap = Number(args.maxChars) === 0 ? 0 : Math.max(200, Number(args.maxChars) || 2500)
+      if (!cap) return raw
+      try {
+        const j = typeof raw === 'string' ? JSON.parse(raw) : raw
+        if (j && typeof j.text === 'string' && j.text.length > cap) {
+          const 原长 = j.text.length
+          j.text = j.text.slice(0, cap) + '\n…（后面省略 ' + (原长 - cap) + ' 字；要全文传 maxChars: 0）'
+          j.截断 = true
+          j.原文长度 = 原长
+        }
+        return JSON.stringify(j)
+      } catch (e) { return raw }
+    },
   })
 
   tool({
