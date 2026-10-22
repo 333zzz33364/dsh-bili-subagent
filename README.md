@@ -145,6 +145,38 @@ $p = "把上面 BOM=True 那一行的路径粘到这里"
 > ⚠️ 手动改 profile 里的文件，一律存 **UTF-8 无 BOM**。让 AI 帮你改时，别让它用
 > `Set-Content -Encoding UTF8` 或 `Out-File -Encoding utf8`（Windows 自带的这两个默认**带 BOM**）。
 
+## 更新到最新版
+
+**最省事**：把这个仓库的地址丢给你自己的 DSH，说「**帮我更新这个插件**」。装完**重启一次 DSH**。
+
+也可以点 **设置 → 刷B站 最上面的「检查更新」** —— 有新版会提示，还能一键复制更新命令。
+
+命令行（`--profile` 照你平时那个写，桌面端一般 `desktop`、网页端 `web`）：
+
+```bash
+dsh plugin --profile desktop remove dsh-bili-subagent
+dsh plugin --profile desktop add github:Yuuyuko-uu/dsh-bili-subagent
+```
+
+> ⚠️ **必须先卸再装**：直接装可能拿到缓存里的旧副本，装完还是老的。
+> ⚠️ 装完**重启一次 DSH**才会用新代码。
+
+### 我的设置会不会丢？
+
+**不会。** 设置存在 DSH 家目录（`%USERPROFILE%\.dsh\`）里，不在插件代码里；卸载只删代码：
+
+```
+.dsh\bili-duty\config.json   （还有 state.json、B站登录凭证）
+```
+
+所以卸载 → 重装，刷视频的设置、每天刷了几轮、B站登录状态 都还在。
+
+三件小事提醒：
+
+- **别用「重装 DSH」来更新插件** —— 那是两件事，重装可能动到 profile。
+- **新版本新加的设置项**会用默认值（以前没这一项），想要自己的值就再填一次。
+- 设置项改名/换单位时（比如「隔几小时」→「隔几分钟」）会自动换算，不用你管。
+
 ## 首次使用（两步）
 
 1. **装主依赖** —— 设置页点「装主依赖」：在插件自己的家目录建独立 venv，装
