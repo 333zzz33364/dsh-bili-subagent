@@ -7,4 +7,5 @@ tmp/
 .DS_Store
 Thumbs.db
 *.zst
-*.bak
+*.bak*
+*.orig
