@@ -520,6 +520,8 @@ export function apply(ctx, config) {
             if (!m) continue
             const 路径 = join(笔记夹, m[1] + '-' + dayKey(new Date()) + '.md')
             // ⭐ 顺手取封面地址（B站 公开接口，不用登录）；取不到就留空，不影响笔记
+            // ⚠️ 2026-10-22：档位也从正文里抠出来存进笔记头 —— 卡片页只读头，不去猜正文
+            const 档 = (/档位[：:]\s*(值得看|可以看|不值当)/.exec(段) || [])[1] || ''
             let 封面 = ''
             try {
               const vr = await fetch('https://api.bilibili.com/x/web-interface/view?bvid=' + m[1])
@@ -530,6 +532,7 @@ export function apply(ctx, config) {
               writeFileSync(路径, '# ' + m[1] + String.fromCharCode(10, 10)
                 + '> 抓取时间：' + new Date().toISOString() + String.fromCharCode(10)
                 + '> 来源：自动刷 B 站第 ' + (Number(st.count) || 0) + ' 轮' + String.fromCharCode(10)
+                + (档 ? '> 档位：' + 档 + String.fromCharCode(10) : '')
                 + (封面 ? '> 封面：' + 封面 + String.fromCharCode(10) : '') + String.fromCharCode(10)
                 + '### ' + 段.trim() + String.fromCharCode(10), 'utf8')
             } catch (e) {}
@@ -1456,8 +1459,10 @@ export function apply(ctx, config) {
       const 白名单 = ['i0.hdslb.com', 'i1.hdslb.com', 'i2.hdslb.com']
       let 目标 = null
       try {
+        // ⚠️ 2026-10-22 修：B站 笔记里存的封面地址是 **http://**，原来只认 https ⇒ 全部 400、图全裂。
+        //    现在 http / https 都收，但**取的时候一律强制走 https**。
         const u = new URL(原)
-        if (u.protocol === 'https:' && 白名单.indexOf(u.hostname) >= 0) 目标 = u
+        if (白名单.indexOf(u.hostname) >= 0) 目标 = new URL('https://' + u.hostname + u.pathname + u.search)
       } catch (e) {}
       if (!目标) { res.writeHead(400); return res.end('bad url') }
       try {
@@ -1485,8 +1490,13 @@ export function apply(ctx, config) {
           if (!m) continue
           let text = ''
           try { text = readFileSync(join(夹, f), 'utf8') } catch (e) {}
-          const 标题 = (/^#\s*BV\S+\s*\n+([^\n]+)/.exec(text) || [])[1] || ''
-          const 档 = (/档位[：:]\s*(值得看|可以看|不值当)/.exec(text) || [])[1] || ''
+          // ⚠️ 2026-10-22 修：原来抓的是笔记头里「> 抓取时间」那一行（所以卡片上显示的是时间）。
+          //    真实标题在正文的「**标题**：…」那一行。
+          const 标题 = (/^\*\*标题\*\*[：:]\s*(.+)$/m.exec(text) || [])[1]
+            || (/^#\s+\S*BV\S*\s*\n(?:>[^\n]*\n)*\n*###[^\n]*\n+\*\*[^*]*\*\*[：:]\s*(.+)$/m.exec(text) || [])[1]
+            || ''
+          const 档 = (/^>\s*档位：\s*(值得看|可以看|不值当)/m.exec(text) || [])[1]
+            || (/档位[：:]\s*(值得看|可以看|不值当)/.exec(text) || [])[1] || ''
           const 封面 = (/^>\s*封面：(\S+)/m.exec(text) || [])[1] || ''
           const 为什么 = (/为什么值得[：:]\s*([^\n]+)/.exec(text) || [])[1] || ''
           cards.push({

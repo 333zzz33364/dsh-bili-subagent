@@ -245,6 +245,15 @@ window.__ModuleLoader__.load({
       //    （她的原话：「有些时候还是会跟原先的页面一样，所有东西堆在第一页」）。
       React.useEffect(() => { 应用页签(tab) })
 
+      // ⭐ 进设置页就自动拉一次卡片（原来必须手点「刷新」，不点的话筛什么都是空的）
+      React.useEffect(() => {
+        let 活 = true
+        jget('/cards')
+          .then((r) => { if (!活) return; 卡缓存 = (r && r.cards) || []; 画卡('all') })
+          .catch(() => {})
+        return () => { 活 = false }
+      }, [])
+
       // ⭐ 卡片墙：拿到的卡片先存着，筛的时候只重画不重拉（2026-10-22）
       let 卡缓存 = []
       const 转义 = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -253,7 +262,12 @@ window.__ModuleLoader__.load({
         if (!box) return
         const 选 = (!档 || 档 === 'all') ? 卡缓存 : 卡缓存.filter((c) => String(c['档'] || '') === 档)
         if (!选.length) {
-          box.textContent = 卡缓存.length ? ('这一档没有卡片（共 ' + 卡缓存.length + ' 条）') : '还没有笔记 —— 跑一轮之后就有了'
+          const 有档的 = 卡缓存.filter((c) => c['档']).length
+          box.textContent = !卡缓存.length
+            ? '还没有笔记 —— 跑一轮之后就有了'
+            : (有档的 === 0
+              ? ('现有 ' + 卡缓存.length + ' 条笔记还没标档位 —— 下一轮刷完就有了')
+              : ('这一档没有卡片（共 ' + 卡缓存.length + ' 条，其中 ' + 有档的 + ' 条标了档位）'))
           return
         }
         // 设置页里用**小缩略图**（她说这样看得清楚，也不挤）
@@ -897,7 +911,11 @@ window.__ModuleLoader__.load({
         list === null
           ? h('div', { 'data-bd-note': '' }, '读取中…')
           : (!这页.length
-            ? h('div', { 'data-bd-note': '' }, '还没有笔记 —— 跑一轮之后就有了')
+            ? h('div', { 'data-bd-note': '' },
+                !全.length ? '还没有笔记 —— 跑一轮之后就有了'
+                  : (全.filter((c) => c['档']).length === 0
+                    ? ('现有 ' + 全.length + ' 条笔记还没标档位 —— 下一轮刷完就有了')
+                    : '这一档没有卡片'))
             : h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '12px' } },
                 ...这页.map((c) => h('div', {
                   key: c.file,
