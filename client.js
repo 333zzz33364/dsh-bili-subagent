@@ -600,19 +600,9 @@ window.__ModuleLoader__.load({
             },
               h('option', { value: 'off' }, '不动（默认）'),
               h('option', { value: 'like' }, '只点赞'),
-              h('option', { value: 'coin' }, '只投币'),
               h('option', { value: 'fav' }, '只收藏'),
-              h('option', { value: 'like_fav' }, '点赞 + 收藏'),
-              h('option', { value: 'triple' }, '一键三连（赞+币+收藏）')),
+              h('option', { value: 'like_fav' }, '点赞 + 收藏')),
             h('div', { 'data-bd-note': '' }, '一键三连 = 点赞 + 投币 + 收藏；点过 / 收过的会自动跳过，不重复')),
-          h('div', { 'data-bd-sub': '' },
-            h('div', { 'data-bd-label': '' }, '投币枚数'),
-            h('input', {
-              'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 1, max: 2,
-              defaultValue: String(cfg.tripleCoin ?? 1),
-              onBlur: (e) => patch({ tripleCoin: Math.max(1, Math.min(Number(e.target.value) || 1, 2)) }, '投币枚数'),
-            }),
-            h('div', { 'data-bd-note': '' }, '1 或 2 枚。⚠️ 投币会**花账号里的硬币**，每天有上限。')),
           h(ToggleRow, {
             label: '每条视频写一份笔记',
             note: '存在 reports/<BV>-<日期>.md，以后能查「这条看过没、当时怎么说的」',
@@ -898,43 +888,62 @@ window.__ModuleLoader__.load({
       const 当前 = Math.min(页, 页们 - 1)
       const 这页 = 选.slice(当前 * 每页, 当前 * 每页 + 每页)
       const 换 = (k) => { set档(k); set页(0) }
+      // ⭐ 按天分组（2026-10-22）：日期当小标题，同一天的合在一起，中间一条分割线
+      const 按天 = []
+      for (const c of 这页) {
+        const d = c.date || '（没写日期）'
+        const last = 按天[按天.length - 1]
+        if (last && last.d === d) last.list.push(c)
+        else 按天.push({ d: d, list: [c] })
+      }
+      const 卡 = (c) => h('div', {
+        key: c.file,
+        style: { border: '1px solid rgba(127,127,127,0.25)', borderRadius: '10px', overflow: 'hidden', background: 'rgba(127,127,127,0.06)' },
+      },
+        c.cover ? h('img', {
+          src: API + '/cover?u=' + encodeURIComponent(c.cover),
+          alt: '', loading: 'lazy',
+          style: { width: '100%', aspectRatio: '16 / 9', objectFit: 'cover', display: 'block' },
+        }) : null,
+        h('div', { style: { padding: '8px 10px 10px' } },
+          h('div', { style: { fontWeight: 600, margin: '0 0 4px', lineHeight: 1.45 } }, c.title || '(没标题)'),
+          h('div', { style: { fontSize: '12px', opacity: 0.65 } }, c.bvid + (c['档'] ? '　【' + c['档'] + '】' : '')),
+          c.why ? h('div', { style: { fontSize: '12px', opacity: 0.8, lineHeight: 1.55, marginTop: '4px' } }, c.why) : null))
+
+      let 内容 = null
+      if (list === null) {
+        内容 = h('div', { 'data-bd-note': '' }, '读取中…')
+      } else if (!这页.length) {
+        const 有档 = 全.filter((c) => c['档']).length
+        内容 = h('div', { 'data-bd-note': '' },
+          !全.length ? '还没有笔记 —— 跑一轮之后就有了'
+            : (有档 === 0 ? ('现有 ' + 全.length + ' 条笔记还没标档位 —— 下一轮刷完就有了') : '这一档没有卡片'))
+      } else {
+        内容 = h('div', {},
+          ...按天.map((g, gi) => h('div', { key: g.d + gi },
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', margin: gi ? '18px 0 10px' : '0 0 10px' } },
+              h('div', { style: { fontWeight: 700, fontSize: '13px', opacity: 0.85, whiteSpace: 'nowrap' } }, g.d),
+              h('div', { style: { flex: '1 1 auto', height: '1px', background: 'rgba(127,127,127,0.28)' } }),
+              h('div', { style: { fontSize: '12px', opacity: 0.55, whiteSpace: 'nowrap' } }, g.list.length + ' 条')),
+            h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '12px' } },
+              ...g.list.map(卡)))))
+      }
+
+      const 翻页 = 页们 > 1
+        ? h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '14px' } },
+            h('button', { 'data-bd-btn': '', disabled: 当前 <= 0, onClick: () => set页(当前 - 1) }, '上一页'),
+            h('div', { style: { fontSize: '12px', opacity: 0.7, alignSelf: 'center' } }, (当前 + 1) + ' / ' + 页们),
+            h('button', { 'data-bd-btn': '', disabled: 当前 >= 页们 - 1, onClick: () => set页(当前 + 1) }, '下一页'))
+        : null
+
       return h('div', { style: { padding: '14px 16px', overflow: 'auto', height: '100%' } },
         h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '10px' } },
           h('div', { style: { fontWeight: 700, fontSize: '15px' } }, '刷过的视频'),
           h('div', { style: { opacity: 0.6, fontSize: '12px' } }, '共 ' + 全.length + ' 条'),
           ...[['all', '全部'], ['值得看', '值得看'], ['可以看', '可以看'], ['不值当', '不值当']].map(([k, 名]) =>
-            h('button', {
-              key: k, 'data-bd-btn': '',
-              style: 档 === k ? { fontWeight: 700 } : { opacity: 0.6 },
-              onClick: () => 换(k),
-            }, 名))),
-        list === null
-          ? h('div', { 'data-bd-note': '' }, '读取中…')
-          : (!这页.length
-            ? h('div', { 'data-bd-note': '' },
-                !全.length ? '还没有笔记 —— 跑一轮之后就有了'
-                  : (全.filter((c) => c['档']).length === 0
-                    ? ('现有 ' + 全.length + ' 条笔记还没标档位 —— 下一轮刷完就有了')
-                    : '这一档没有卡片'))
-            : h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '12px' } },
-                ...这页.map((c) => h('div', {
-                  key: c.file,
-                  style: { border: '1px solid rgba(127,127,127,0.25)', borderRadius: '10px', overflow: 'hidden', background: 'rgba(127,127,127,0.06)' },
-                },
-                  c.cover ? h('img', {
-                    src: API + '/cover?u=' + encodeURIComponent(c.cover),
-                    alt: '', loading: 'lazy',
-                    style: { width: '100%', aspectRatio: '16 / 9', objectFit: 'cover', display: 'block' },
-                  }) : null,
-                  h('div', { style: { padding: '8px 10px 10px' } },
-                    h('div', { style: { fontSize: '12px', opacity: 0.65 } },
-                      (c.date || '') + '　' + c.bvid + (c['档'] ? '　【' + c['档'] + '】' : '')),
-                    h('div', { style: { fontWeight: 600, margin: '4px 0', lineHeight: 1.45 } }, c.title || '(没标题)'),
-                    c.why ? h('div', { style: { fontSize: '12px', opacity: 0.8, lineHeight: 1.55 } }, c.why) : null))))),
-        页们 > 1 ? h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '12px' } },
-          h('button', { 'data-bd-btn': '', disabled: 当前 <= 0, onClick: () => set页(当前 - 1) }, '上一页'),
-          h('div', { style: { fontSize: '12px', opacity: 0.7, alignSelf: 'center' } }, (当前 + 1) + ' / ' + 页们),
-          h('button', { 'data-bd-btn': '', disabled: 当前 >= 页们 - 1, onClick: () => set页(当前 + 1) }, '下一页')) : null)
+            h('button', { key: k, 'data-bd-btn': '', style: 档 === k ? { fontWeight: 700 } : { opacity: 0.6 }, onClick: () => 换(k) }, 名))),
+        内容,
+        翻页)
     }
 
     return {

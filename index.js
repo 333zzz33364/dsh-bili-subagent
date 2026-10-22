@@ -541,7 +541,47 @@ export function apply(ctx, config) {
         }
       }
     } catch (e) { log('记笔记/记最值得那条失败（不影响这一轮）：' + (e?.message ?? e)) }
-    return { ok: true, report: output, hint }
+
+    // ⭐ 三连：设置里选了模式，宿主就把**报告里标了「值得看」的**那几条点上（2026-10-22）
+    //    为什么放宿主：不靠模型想起来；而且「哪几条值得看」报告里已经写着了。
+    //    范围：只点标了「值得看」的（没标就退回「这一轮挑中的全部」，最多 5 条）；
+    //    ⚠️ 三连模式会花硬币（每条 1~2 枚），所以一定要有条数上限。
+    let 三连结果 = ''
+    try {
+      if (cfg.tripleMode && cfg.tripleMode !== 'off') {
+        const st2 = readJson(dutyStateFile, {})
+        const 全 = Array.isArray(st2.lastBvs) ? st2.lastBvs.slice(0, 5) : []
+        // 从报告里找「档位：值得看」那几段对应的 BV
+        const 值得看 = []
+        for (const 段 of String(output).split(/^#{1,6}\s*(?=BV)/m)) {
+          const m = /^(BV[0-9A-Za-z]{10})/.exec(段.trim())
+          if (!m) continue
+          if (/档位[：:]\s*值得看/.test(段)) 值得看.push(m[1])
+        }
+        const 目标们 = (值得看.length ? 值得看 : 全).slice(0, 5)
+        if (!目标们.length) {
+          log('三连：这一轮没抠到 BV，跳过')
+        } else {
+          const 做了 = []
+          for (const bv of 目标们) {
+            try {
+              const r = await call('bili_triple', { bvid: bv, mode: cfg.tripleMode, coin_num: Number(cfg.tripleCoin) || 1 })
+              let ok = false
+              try {
+                const j = typeof r === 'string' ? JSON.parse(r) : r
+                ok = Boolean(j && j.ok)
+              } catch (e) {}
+              log('三连（' + cfg.tripleMode + '）→ ' + bv + '：' + String(r).slice(0, 160))
+              if (ok) 做了.push(bv)
+            } catch (e) { log('三连 ' + bv + ' 失败（跳过）：' + (e?.message ?? e)) }
+          }
+          if (做了.length) 三连结果 = '点了 ' + 做了.length + ' 条（' + 做了.join('、') + '）'
+          log('三连收工：' + (三连结果 || '一条都没成'))
+        }
+      }
+    } catch (e) { log('三连那段出错（不影响报告）：' + (e?.message ?? e)) }
+
+    return { ok: true, report: output, hint: 三连结果 ? (hint + String.fromCharCode(10) + '（报告里值得看的那几条，我顺手点过了：' + 三连结果 + '）') : hint }
   }
 
   const doScan = async (direction, exec) => {

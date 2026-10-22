@@ -1445,7 +1445,8 @@ async def bili_triple(bvid: str, mode: str = "like", coin_num: int = 1) -> str:
         mid = int(getattr(cred, "dedeuserid", 0) or 0)
         fav_id = 0
         try:
-            data = await favorite_list.get_favorite_list(up_id=mid, credential=cred)
+            # ⚠️ 2026-10-22 修：这个版本里没有 get_favorite_list，正确名字是 get_video_favorite_list
+            data = await favorite_list.get_video_favorite_list(uid=mid, credential=cred)
             for it in (data.get("list") or []):
                 if it.get("id"):
                     fav_id = int(it["id"])
@@ -1459,8 +1460,15 @@ async def bili_triple(bvid: str, mode: str = "like", coin_num: int = 1) -> str:
 
     try:
         if mode == "triple":
-            await v.triple()
-            做了.append("一键三连（赞+币+收藏）")
+            # ⚠️ 2026-10-22：库里的 triple() 一步失败就整条崩（实测 -403 全灭）。
+            #    改成一步一步来，失败只记哪一步失败，成功的照样算。
+            # ⚠️ 2026-10-22 按使用者要求：**不投币**（B站 对小号投币报 -401，且会花硬币）。
+            #    一键三连 = 点赞 + 收藏。
+            for 步 in (点赞, 收藏):
+                try:
+                    await 步()
+                except Exception as e:
+                    跳过.append(步.__name__ + "失败：" + str(e)[:60])
         elif mode == "like":
             await 点赞()
         elif mode == "coin":
