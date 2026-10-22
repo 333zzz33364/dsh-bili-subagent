@@ -575,7 +575,7 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
         /* ── 自动刷在哪个会话 ── */
         h('div', { 'data-bd-sec': '', 'data-bd-in': 'daily' },
           h('div', { 'data-bd-h': '' }, '自动刷在哪个会话'),
-          h('div', { 'data-bd-note': '' }, '谷时自动刷的时候，去哪个会话里叫大肥鱼。选你跟她平时聊天的那个就好。'),
+          h('div', { 'data-bd-note': '' }, '谷时自动刷的时候，去哪个会话里叫它。选你平时跟它聊天的那个就好。'),
           h('select', {
             'data-bd-input': '', value: targetSession ?? '',
             onChange: (e) => { const v = e.target.value; setTargetSession(v); patch({ targetSession: v }, '自动刷会话') },
@@ -631,8 +631,8 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
         /* ── 收到的 @ 和回复 ── */
         h('div', { 'data-bd-sec': '', 'data-bd-in': 'social' },
           h('div', { 'data-bd-h': '' }, '收到的 @ 和回复'),
-          h('div', { 'data-bd-note': '' }, '每轮刷之前顺手看一眼：有人 @ 你、回了你的评论、或者私信转给你视频，就把内容递到伙伴手上，由她自己决定回不回。想只看某几个人，就在下面填「还要理谁」。'),
-          h('div', { 'data-bd-note': '' }, '从哪条路进来就从哪条路回去：你私信转给她的视频，她看完会私信回你（不发评论、不 @）；你在评论区 @ 她，她就在评论区回你，不会再多发一条私信。'),
+          h('div', { 'data-bd-note': '' }, '每轮刷之前顺手看一眼：有人 @ 你、回了你的评论、或者私信转给你视频，就把内容递到伙伴手上，由它自己决定回不回。想只看某几个人，就在下面填「还要理谁」。'),
+          h('div', { 'data-bd-note': '' }, '从哪条路进来就从哪条路回去：你私信转给它的视频，它看完会私信回你（不发评论、不 @）；你在评论区 @ 它，它就在评论区回你，不会再多发一条私信。'),
           h(ToggleRow, {
             label: '每轮顺手看一眼 @ 和回复',
             note: '关掉就完全不看（别人的乱 @ 从来不看）',
@@ -667,7 +667,7 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
                 patch({ inboxMaxRemind: n }, '提醒次数')
               },
             }),
-            h('div', { 'data-bd-note': '' }, '她一直没回的话，最多再提几次就停（默认 2）。开着「同一条只提醒一次」时，这个数用不上。')),
+            h('div', { 'data-bd-note': '' }, '它一直没回的话，最多再提几次就停（默认 2）。开着「同一条只提醒一次」时，这个数用不上。')),
           h('div', { 'data-bd-sub': '' },
             h('div', { 'data-bd-label': '' }, '一天最多回别人几条'),
             h('input', {
@@ -680,7 +680,7 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
                 patch({ inboxPerDay: n }, '一天最多回别人几条')
               },
             }),
-            h('div', { 'data-bd-note': '' }, '「别人」的 @ 和回复一天最多递几条给她；到了上限就不再递（明天重新算）。**你自己 @ 她不算额度**。填 0 = 别人的一律不递。')),
+            h('div', { 'data-bd-note': '' }, '「别人」的 @ 和回复一天最多递几条给它；到了上限就不再递（明天重新算）。**你自己 @ 它不算额度**。填 0 = 别人的一律不递。')),
           h('div', { 'data-bd-row': '' },
             h('button', { 'data-bd-btn': '', disabled: busy === 'inbox', onClick: onInbox },
               busy === 'inbox' ? '看…' : '现在就去看一眼'))),
