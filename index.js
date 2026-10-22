@@ -427,6 +427,20 @@ export function apply(ctx, config) {
   // ⭐ 这一轮「该发但还没发」的评论：没发评论就不让发私信（模型老跳过评论，只能硬约束）
   let pendingComment = null
 
+  // ⭐ 2026-10-22「门对门」：从私信转进来的那条，看完**只私信回**，不评论、不 @、不带 BV 号。
+  //    从哪条路进来就从哪条路回去 —— 两边都做一遍才是多此一举（主人 2026-10-22 定）。
+  function dmReplyHint(owner) {
+    const 三连 = (!cfg.tripleMode || cfg.tripleMode === 'off')
+      ? '· 顺手点个赞、收藏一下（`bili_triple`，mode 用 like_fav）。'
+      : ''
+    return [
+      '这条是' + owner + '私信转给你的。看完**私信回**她 —— 用 `bili_send_message`；**不要**发评论、**不要** @，也别去评论区（那是另一条路，别混）。',
+      '· 话不用长：讲了什么、值不值得看、你自己怎么看，三句就够。**不用带 BV 号** —— 她转给你的，她知道是哪条。',
+      三连,
+      '· 上面这段说明别念出来，用你自己的话说。',
+    ].filter((x) => x !== '').join(String.fromCharCode(10))
+  }
+
   const scanWith = async (parent, direction, exec, bvid = '') => {
     const dir = String(direction || '').trim()
       || (Array.isArray(cfg.keywords) ? cfg.keywords.filter(Boolean).join(' ') : '')
@@ -445,6 +459,10 @@ export function apply(ctx, config) {
         ? '\n\n⚠️ 报告形态：**不写详细报告** —— 直接给大肥鱼一段简短的口头总结（挑中哪几条、各自一句），不用逐条展开。'
         : '')
     const 定点 = String(bvid || '').trim()
+    // ⭐ 2026-10-22「门对门」：这条 BV 要是从私信转进来的，这一轮就**只私信回** ——
+    //    不塞评论块、不欠评论（连带 bili_send_message 那道「先发评论」的闸也不会挡）。
+    //    从哪条路进来，就从哪条路回去；两个都做才是多此一举。
+    const 私信回话 = Boolean(定点) && isDmShare(定点)
     const prompt = (定点
       ? String(cfg.watchPrompt || WATCH_TMPL).split('{bvid}').join(定点)
       : String(cfg.scanPrompt || SCAN_PROMPT_TMPL))
@@ -483,7 +501,7 @@ export function apply(ctx, config) {
     // 投递提示：让大肥鱼知道接下来要不要发评论/私信（她拿报告后自己决定、自己发）
     // ⚠️ 「每轮最多发几条评论」这个设置项已经去掉（上游用来管自动评论额度，被收件箱取代）。
     //    闸只看：开着自动评论 + 填了要 @ 谁 + 不是「只私信」模式
-    const commentOn = Boolean(cfg.autoComment && cfg.mentionName && cfg.dmMode !== 'only')
+    const commentOn = Boolean(cfg.autoComment && cfg.mentionName && cfg.dmMode !== 'only') && !私信回话
     // ⚠️ 这个数现在**没有设置项了**（「每轮最多发几条评论」已从设置页去掉，额度概念被收件箱取代），
     //    但下面拼「评论块」和 {commentQuota} 占位符时还在用它 ⇒ 必须定义，否则整条 bili_scan 直接抛
     //    ReferenceError（2026-10-21 用户实测：自动评论关着时刷不起来，就是这个）
@@ -498,7 +516,8 @@ export function apply(ctx, config) {
     const 都不要块 = '报告拿给你了，你自己看着跟' + owner + '聊。'
     // ⭐ 2026-10-21：投递提示改成「模板常驻」（设置页里显示的就是默认文案，不是留空）
     const hintTpl = String(cfg.hintPrompt || '').trim() || HINT_TMPL
-    const hint = hintTpl
+    // ⭐ 私信转进来的那条：回法另写一套（只私信、不评论、不带 BV），不走上面那套模板
+    const hint = (私信回话 ? dmReplyHint(owner) : hintTpl)
       .split('{owner}').join(owner)
       .split('{mention}').join(String(cfg.mentionName || ''))
       .split('{commentQuota}').join(String(commentQuota))
@@ -1186,6 +1205,34 @@ export function apply(ctx, config) {
     } catch (e) { log('收件箱记账失败：' + (e?.message ?? e)) }
   }
 
+  /**
+   * ⭐ 2026-10-22「门对门」：记住「这条 BV 是私信转进来的」，6 小时内有效。
+   *    bili_scan 定点看这一条时据此关掉评论块 —— 私信进来的就只私信回。
+   *    单独一个文件，别跟 inbox.json 的记账混在一起（那边是"递没递过"，这边是"哪条从哪来"）。
+   */
+  const dmShareFile = join(stateDir, 'dm-share.json')
+  const DM_SHARE_TTL = 6 * 3600_000
+  function markDmShares(items) {
+    try {
+      const list = (items || []).filter((it) => it && it.kind === 'dm' && it.bvid)
+      if (!list.length) return
+      const now = Date.now()
+      const out = {}
+      for (const [k, v] of Object.entries(readJson(dmShareFile, {}) || {})) {
+        if (Number(v) && now - Number(v) < DM_SHARE_TTL) out[k] = Number(v)
+      }
+      for (const it of list) out[String(it.bvid)] = now
+      writeJson(dmShareFile, out)
+      log('收件箱：记下 ' + list.length + ' 条「私信转来的」，这几条这轮不发公开评论')
+    } catch (e) { log('记私信来源失败（不影响）：' + (e?.message ?? e)) }
+  }
+  function isDmShare(bvid) {
+    try {
+      const t = Number((readJson(dmShareFile, {}) || {})[String(bvid || '')] || 0)
+      return t > 0 && Date.now() - t < DM_SHARE_TTL
+    } catch { return false }
+  }
+
   /** 拼成一段人话（不是指令）—— 里面带 rpid / root，她用 bili_reply 回的时候要用 */
   function renderInbox(items) {
     const 自己 = Number(cfg.dmUid || 0)
@@ -1205,18 +1252,36 @@ export function apply(ctx, config) {
       return '· ' + 谁 + ' 在' + 哪 + ' ' + 啥 + '：「' + 话 + '」\n  ' + it.bvid
         + '　rpid=' + (it.rpid || 0) + (it.root ? '　root=' + it.root : '')
     }
-    // ⭐ 两组分开：**你自己 @ 的，就是要回**；别人回的楼中楼，回不回你定。
-    //    （一开始笼统写了"都不必回"，主次被抹平了 —— 2026-10-21 纠正）
-    const 我的 = items.filter((it) => Number(it.mid || 0) === 自己)
-    const 别人 = items.filter((it) => Number(it.mid || 0) !== 自己)
+    // ⭐ 2026-10-22「门对门」：分三组，**每组各写各的回法** ——
+    //    私信进来的私信回、评论区 @ 的在评论区回，不许串。
+    //    （原来只有一句统一的"正文里不要手打@"，那是评论区的语法，
+    //     私信那条吃到它就等于被叫去评论区回 —— 2026-10-22 主人指出）
+    const ownerName = String(cfg.ownerName || '你')
+    const 私信们 = items.filter((it) => it.kind === 'dm')
+    const 我的 = items.filter((it) => it.kind !== 'dm' && Number(it.mid || 0) === 自己)
+    const 别人 = items.filter((it) => it.kind !== 'dm' && Number(it.mid || 0) !== 自己)
     const 段 = []
-    if (我的.length) 段.push('〔' + (cfg.ownerName || '你') + ' 找你了 —— 这些要回〕\n' + 我的.map(行).join('\n'))
-    if (别人.length) 段.push('〔别人回了你的评论 —— 想回就回〕\n' + 别人.map(行).join('\n'))
-    段.push('回的时候：正文里**不要**手打 @，B站会自己加「回复 @某某」；楼中楼记得带 root。')
-    return 段.join('\n\n')
+    if (私信们.length) {
+      段.push('〔' + ownerName + ' 私信转给你 ' + 私信们.length + ' 条视频 —— 看完**私信回**〕'
+        + String.fromCharCode(10) + 私信们.map(行).join(String.fromCharCode(10))
+        + String.fromCharCode(10) + '  ↳ 回法：用 `bili_send_message` 私信回她，**不发评论、不 @**；'
+        + '话里**不用带 BV 号**（她转给你的，她知道是哪条）。')
+    }
+    if (我的.length) {
+      段.push('〔' + ownerName + ' 在评论区找你了 —— 在**评论区**回〕'
+        + String.fromCharCode(10) + 我的.map(行).join(String.fromCharCode(10))
+        + String.fromCharCode(10) + '  ↳ 回法：用 `bili_reply` 在评论区回（楼中楼带 root）；'
+        + '正文里**不要**手打 @，B站会自己加「回复 @某某」。**不用再私信说一遍**。')
+    }
+    if (别人.length) {
+      段.push('〔别人回了你的评论 —— 想回就回，也是在评论区回〕'
+        + String.fromCharCode(10) + 别人.map(行).join(String.fromCharCode(10))
+        + String.fromCharCode(10) + '  ↳ 回法同上一类：评论区回，正文别手打 @。')
+    }
+    return 段.join(String.fromCharCode(10) + String.fromCharCode(10))
   }
 
-    const triggerFeiyuScan = async (why, extra) => {
+    const triggerFeiyuScan = async (why, extra, box) => {
     let target = String(cfg.targetSession || '').trim()
     if (!target) target = pickRecentSession()          // 没选 → 最近聊过的那个
     let agent = null
@@ -1237,15 +1302,25 @@ export function apply(ctx, config) {
       role: 'user',
       // ⭐ 这段是设置页「自动刷触发语」，可改；留空回落到内置默认
       content: [{ type: 'text', text: (() => {
+        const ownerN = String(cfg.ownerName || '你')
         const t = String(cfg.triggerPrompt || '').trim() || TRIGGER_TMPL
-        const base = t.split('{owner}').join(String(cfg.ownerName || '你'))
+        const base = t.split('{owner}').join(ownerN)
+        // ⭐ 2026-10-22「门对门」：这一轮如果只有私信，就别叫她去刷一整轮、也别叫她去评论 ——
+        //    原来的触发语里有「该发评论发评论」，对私信那条是错的。
+        const 全私信 = Array.isArray(box) && box.length > 0 && box.every((it) => it && it.kind === 'dm')
+        const 例外 = 全私信
+          ? '⚠️ 这一轮只有' + ownerN + '私信转来的一条视频：**只看那一条**（`bili_scan` 传 bvid），别刷整轮；'
+            + '看完**私信回她**，不要发评论、不要 @、也不要去评论区。' + String.fromCharCode(10) + String.fromCharCode(10)
+          : ''
         // ⭐ 有 @ / 回复就一起递过去：一条消息里说完，别连着弹两下
-        return extra ? base + '\n\n' + extra : base
+        return 例外 + (extra ? base + String.fromCharCode(10) + String.fromCharCode(10) + extra : base)
       })() }],
       source: { kind: 'bili-duty-scan' },
     }
     try {
       await agent.followup(msg)
+      // ⭐ 递出去了才记「这条是从私信来的」—— 没递进去就别乱关评论块
+      if (Array.isArray(box) && box.some((it) => it && it.kind === 'dm')) markDmShares(box)
       log('自动刷：已触发伙伴自己刷一轮（' + why + '，会话 ' + target.slice(0, 20) + '…）')
       return true
     } catch (e) {
@@ -1291,7 +1366,7 @@ export function apply(ctx, config) {
           } catch (e) { log('收件箱：这一轮拉取失败 ' + (e?.message ?? e)) }
           let sent = false
           try {
-            sent = await triggerFeiyuScan(`window:${k}`, extra)
+            sent = await triggerFeiyuScan(`window:${k}`, extra, box)
             if (sent && box.length) commitInbox(box)   // 真递出去了才记账
           } catch (e) { log('收件箱：投递异常 ' + (e?.message ?? e)) }
           return sent
@@ -1632,7 +1707,7 @@ export function apply(ctx, config) {
         const box = await pickInbox()
         if (!box.length) return sendJson(res, 200, { ok: true, count: 0, hint: '这会儿没有要转给你的 @ 或回复（或者都已经回过 / 提醒过上限了）' })
         const text = renderInbox(box)
-        const sent = await triggerFeiyuScan('inbox', text)
+        const sent = await triggerFeiyuScan('inbox', text, box)
         if (sent) commitInbox(box)
         log('收件箱（手动）：' + box.length + ' 条，投递' + (sent ? '成功' : '失败'))
         return sendJson(res, 200, {
