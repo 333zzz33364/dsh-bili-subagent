@@ -1,5 +1,5 @@
 /**
- * dsh-bili-scroll —— 浏览器半端（**设置在「设置」里的一页**）
+ * dsh-bili-subagent —— 浏览器半端（**设置在「设置」里的一页**）
  * ============================================================================
  * ⭐ **client bundle 不是 ESM，是自注册脚本**（2026-10-14 从官方包里挖到的约定）：
  *
@@ -141,6 +141,7 @@ window.__ModuleLoader__.load({
     function Panel() {
       const [st, setSt] = useStatus(5000)
       const [busy, setBusy] = React.useState('')
+      const [tab, setTab] = React.useState('daily')   // 页签：daily / taste / social / adv / cards
       const [msg, setMsg] = React.useState('')
       const [msgTone, setMsgTone] = React.useState('')
       const [rl, setRl] = React.useState(null)
@@ -225,6 +226,51 @@ window.__ModuleLoader__.load({
       const say = (text, tone) => {
         setMsg(text); setMsgTone(tone || '')
         setRunNote(text ? { t: text, tone: tone || '' } : null)   // ⭐ 同时镜像到顶部，免得提示掉到页面最底下看不见
+      }
+
+      // ⭐ 页签：只控制显示，不重建结构（2026-10-22）
+      const 应用页签 = (t) => {
+        try {
+          const root = document.querySelector('[data-bd-root]')
+          if (!root) return
+          for (const el of root.querySelectorAll('[data-bd-sec]')) {
+            const 该看不该看 = el.getAttribute('data-bd-in') === t
+            el.style.display = 该看不该看 ? '' : 'none'
+          }
+        } catch (e) {}
+      }
+      // ⚠️ 不写依赖数组 = **每次渲染后都重贴一遍**。
+      //    原来只写了 [tab]，可是设置页每次 load()/patch() 都会重渲染，
+      //    重渲染后 React 会把 style 重新算一遍 → 所有小节又全露出来
+      //    （她的原话：「有些时候还是会跟原先的页面一样，所有东西堆在第一页」）。
+      React.useEffect(() => { 应用页签(tab) })
+
+      // ⭐ 卡片墙：拿到的卡片先存着，筛的时候只重画不重拉（2026-10-22）
+      let 卡缓存 = []
+      const 转义 = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+      const 画卡 = (档) => {
+        const box = document.getElementById('bd-cards')
+        if (!box) return
+        const 选 = (!档 || 档 === 'all') ? 卡缓存 : 卡缓存.filter((c) => String(c['档'] || '') === 档)
+        if (!选.length) {
+          box.textContent = 卡缓存.length ? ('这一档没有卡片（共 ' + 卡缓存.length + ' 条）') : '还没有笔记 —— 跑一轮之后就有了'
+          return
+        }
+        // 设置页里用**小缩略图**（她说这样看得清楚，也不挤）
+        const 块们 = 选.map((c) => {
+          const 图 = c.cover
+            ? '<img src="' + API + '/cover?u=' + encodeURIComponent(c.cover) + '" alt="" loading="lazy" style="width:96px;height:54px;object-fit:cover;border-radius:6px;flex:0 0 auto">'
+            : '<div style="width:96px;height:54px;border-radius:6px;background:rgba(127,127,127,.18);flex:0 0 auto"></div>'
+          return '<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid rgba(127,127,127,.15)">'
+            + 图
+            + '<div style="min-width:0;font-size:12px;line-height:1.5">'
+            + '<div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + 转义(c.title || '(没标题)') + '</div>'
+            + '<div style="opacity:.65">' + 转义(c.date || '') + '　' + 转义(c.bvid) + (c['档'] ? '　【' + 转义(c['档']) + '】' : '') + '</div>'
+            + (c.why ? '<div style="opacity:.8">' + 转义(c.why) + '</div>' : '')
+            + '</div></div>'
+        })
+        box.innerHTML = '<div style="font-size:12px;opacity:.65;margin-bottom:4px">共 ' + 选.length + ' 条'
+          + (档 && 档 !== 'all' ? '（' + 转义(档) + '）' : '') + '</div>' + 块们.join('')
       }
 
       const patch = async (p, what) => {
@@ -389,7 +435,7 @@ window.__ModuleLoader__.load({
 
       const sw = (k) => Boolean(cfg[k])
 
-      return h('div', { 'data-bd-page': '' },
+      return h('div', { 'data-bd-page': '', 'data-bd-root': '' },
 
         /* ── 今天 ── */
         h('div', { 'data-bd-row': '' },
@@ -403,7 +449,22 @@ window.__ModuleLoader__.load({
             'data-warn': runNote.tone === 'warn' ? '' : undefined }, runNote.t) : null,
 
         /* ── 版本 / 检查更新 ── */
-        h('div', { 'data-bd-sec': '' },
+        /* ── 页签 ── */
+        h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', margin: '2px 0 10px' } },
+          ...([
+            ['daily', '日常'],
+            ['taste', '偏好'],
+            ['social', '互动'],
+            ['adv', '高级'],
+            ['cards', '刷过的视频'],
+          ].map(([k, 名]) => h('button', {
+            key: k,
+            'data-bd-btn': '',
+            style: tab === k ? { fontWeight: 700, opacity: 1 } : { opacity: 0.55 },
+            onClick: () => { setTab(k); 应用页签(k) },
+          }, 名)))),
+
+        h('div', { 'data-bd-sec': '', 'data-bd-in': 'adv' },
           h('div', { 'data-bd-h': '' }, '版本'),
           h('div', { 'data-bd-row': '' },
             h('span', { 'data-bd-note': '' },
@@ -425,7 +486,7 @@ window.__ModuleLoader__.load({
             : null),
 
         /* ── 定时 ── */
-        h('div', { 'data-bd-sec': '' },
+        h('div', { 'data-bd-sec': '', 'data-bd-in': 'daily' },
           h('div', { 'data-bd-h': '' }, '什么时候自己跑'),
           h(ToggleRow, {
             label: '峰谷时段自动刷',
@@ -453,7 +514,7 @@ window.__ModuleLoader__.load({
               }))) : null),
 
         /* ── 派子代理刷的模型 ── */
-        h('div', { 'data-bd-sec': '' },
+        h('div', { 'data-bd-sec': '', 'data-bd-in': 'adv' },
           h('div', { 'data-bd-h': '' }, '派子代理刷的模型'),
           h('div', { 'data-bd-row': '' },
             h('div', { 'data-bd-grow': '' },
@@ -480,7 +541,7 @@ window.__ModuleLoader__.load({
         ),
 
         /* ── 自动刷在哪个会话 ── */
-        h('div', { 'data-bd-sec': '' },
+        h('div', { 'data-bd-sec': '', 'data-bd-in': 'daily' },
           h('div', { 'data-bd-h': '' }, '自动刷在哪个会话'),
           h('div', { 'data-bd-note': '' }, '谷时自动刷的时候，去哪个会话里叫大肥鱼。选你跟她平时聊天的那个就好。'),
           h('select', {
@@ -490,43 +551,35 @@ window.__ModuleLoader__.load({
             h('option', { value: '' }, '（不选 = 自动挑最近聊过的）'),
             ...((sessions || []).map((s) => h('option', { value: s.id }, s.title + '（' + s.id.slice(0, 14) + '…）'))))),
 
-        /* ── 它刷过的视频（卡片墙） ── */
-        h('div', { 'data-bd-sec': '' },
-          h('div', { 'data-bd-h': '' }, '它刷过的视频'),
-          h('div', { 'data-bd-note': '' }, '每条视频一份笔记（`reports/<BV>-<日期>.md`）。点「刷新」读出来看，以后能查「这条看过没、当时怎么说的」。'),
-          h('div', { 'data-bd-row': '' },
+        /* ── 刷过的视频（卡片墙） ── */
+        h('div', { 'data-bd-sec': '', 'data-bd-in': 'cards' },
+          h('div', { 'data-bd-h': '' }, '刷过的视频'),
+          h('div', { 'data-bd-note': '' }, '每条视频一份笔记（`reports/<BV>-<日期>.md`）。这里按**子代理标的档位**筛；以后还能查「这条看过没、当时怎么说的」。'),
+          h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', margin: '4px 0 8px' } },
             h('button', {
               'data-bd-btn': '',
               onClick: async () => {
                 const box = document.getElementById('bd-cards')
-                const 换行 = String.fromCharCode(10)
                 if (box) box.innerText = '读取中…'
                 try {
                   const r = await jget('/cards')
-                  const cards = (r && r.cards) || []
-                  if (!cards.length) { if (box) box.innerText = '还没有笔记 —— 跑一轮之后就有了'; return }
-                  const 行们 = []
-                  for (const c of cards) {
-                    行们.push('· ' + (c.date || '') + '　' + c.bvid + (c['档'] ? '　【' + c['档'] + '】' : ''))
-                    if (c.title) 行们.push('   ' + c.title)
-                    if (c.why) 行们.push('   ' + c.why)
-                  }
-                  if (box) box.innerText = 行们.join(换行)
+                  卡缓存 = (r && r.cards) || []
+                  画卡('all')
                 } catch (e) {
                   if (box) box.innerText = '读不出来：' + ((e && e.message) || e)
                 }
               },
-            }, '刷新')),
+            }, '刷新'),
+            ...[['all', '全部'], ['值得看', '值得看'], ['可以看', '可以看'], ['不值当', '不值当']].map(([k, 名]) =>
+              h('button', { key: k, 'data-bd-btn': '', onClick: () => 画卡(k) }, 名))),
           h('div', { id: 'bd-cards', 'data-bd-note': '', style: { whiteSpace: 'pre-wrap', lineHeight: '1.8', marginTop: '8px' } })),
 
         /* ── 三连 ── */
-        h('div', { 'data-bd-sec': '' },
+        h('div', { 'data-bd-sec': '', 'data-bd-in': 'social' },
           h('div', { 'data-bd-h': '' }, '要不要给视频点个赞'),
           h('div', { 'data-bd-note': '' }, '刷完一轮，对**这一轮最值得的那条**做个动作。默认关着 —— 别人装了不该莫名给视频点赞，更不该花人家的硬币。'),
-          h('div', { 'data-bd-row': '' },
-            h('div', { 'data-bd-grow': '' },
-              h('div', { 'data-bd-label': '' }, '三连模式'),
-              h('div', { 'data-bd-note': '' }, '一键三连 = 点赞 + 投币 + 收藏；点过 / 收过的会自动跳过，不重复')),
+          h('div', { 'data-bd-sub': '' },
+            h('div', { 'data-bd-label': '' }, '三连模式'),
             h('select', {
               'data-bd-input': '', value: String(cfg.tripleMode || 'off'),
               onChange: (e) => patch({ tripleMode: e.target.value }, '三连模式'),
@@ -536,7 +589,8 @@ window.__ModuleLoader__.load({
               h('option', { value: 'coin' }, '只投币'),
               h('option', { value: 'fav' }, '只收藏'),
               h('option', { value: 'like_fav' }, '点赞 + 收藏'),
-              h('option', { value: 'triple' }, '一键三连（赞+币+收藏）'))),
+              h('option', { value: 'triple' }, '一键三连（赞+币+收藏）')),
+            h('div', { 'data-bd-note': '' }, '一键三连 = 点赞 + 投币 + 收藏；点过 / 收过的会自动跳过，不重复')),
           h('div', { 'data-bd-sub': '' },
             h('div', { 'data-bd-label': '' }, '投币枚数'),
             h('input', {
@@ -553,7 +607,7 @@ window.__ModuleLoader__.load({
           })),
 
         /* ── 收到的 @ 和回复 ── */
-        h('div', { 'data-bd-sec': '' },
+        h('div', { 'data-bd-sec': '', 'data-bd-in': 'social' },
           h('div', { 'data-bd-h': '' }, '收到的 @ 和回复'),
           h('div', { 'data-bd-note': '' }, '每轮刷之前顺手看一眼：有人 @ 了你、或者回了你的评论，就把内容**递到伙伴手上，让她自己看、自己决定回不回** —— 插件不替她说话，也不打分。默认谁都理（想只看某几个人，就填下面的「还要理谁」）。'),
           h(ToggleRow, {
@@ -609,7 +663,7 @@ window.__ModuleLoader__.load({
               busy === 'inbox' ? '看…' : '现在就去看一眼'))),
 
         /* ── 提示词（可改） ── */
-        h('div', { 'data-bd-sec': '' },
+        h('div', { 'data-bd-sec': '', 'data-bd-in': 'taste' },
           h('div', { 'data-bd-h': '' }, '提示词（可改）'),
           h('div', { 'data-bd-note': '' }, '称呼 + 两段提示词。改了「称呼」，提示词和投递提示里的名字都跟着变。'),
           h('div', { 'data-bd-row': '' },
@@ -670,7 +724,7 @@ window.__ModuleLoader__.load({
               },
             }, '恢复默认'))),
         /* ── 一轮挑几条 ── */
-        h('div', { 'data-bd-sec': '' },
+        h('div', { 'data-bd-sec': '', 'data-bd-in': 'daily' },
           h('div', { 'data-bd-h': '' }, '一轮挑几条'),
           h('div', { 'data-bd-row': '' },
             h('div', { 'data-bd-grow': '' },
@@ -695,7 +749,7 @@ window.__ModuleLoader__.load({
           st.lastRunAt ? h('div', { 'data-bd-note': '' }, `上次跑：${new Date(st.lastRunAt).toLocaleString('zh-CN')}`) : null),
 
         /* ── 挑什么样的（硬门槛） ── */
-        h('div', { 'data-bd-sec': '' },
+        h('div', { 'data-bd-sec': '', 'data-bd-in': 'taste' },
           h('div', { 'data-bd-h': '' }, '挑什么样的'),
           h('div', { 'data-bd-note': '' }, '这两道是硬门槛：不达标的视频，子代理根本看不到 —— 在搜索那一步就滤掉了，不是靠它自觉。留 0 = 不过滤。'),
           h('div', { 'data-bd-row': '' },
@@ -720,7 +774,7 @@ window.__ModuleLoader__.load({
             }))),
 
         /* ── 发言与转写 ── */
-        h('div', { 'data-bd-sec': '' },
+        h('div', { 'data-bd-sec': '', 'data-bd-in': 'social' },
           h('div', { 'data-bd-h': '' }, '它会不会替你说话'),
           h(ToggleRow, {
             label: '自动评论并 @ 你',
@@ -757,7 +811,7 @@ window.__ModuleLoader__.load({
             h('div', { 'data-bd-note': '' }, '⚠️ 建议先让这个号和收件人互关：B站 对「陌生人私信」会限流，还可能不弹提醒')) : null),
 
         /* ── 日报写多细 ── */
-        h('div', { 'data-bd-sec': '' },
+        h('div', { 'data-bd-sec': '', 'data-bd-in': 'daily' },
           h('div', { 'data-bd-h': '' }, '日报写多细'),
           h('select', {
             'data-bd-input': '', value: rl ?? 'full',
@@ -768,7 +822,7 @@ window.__ModuleLoader__.load({
             h('option', { value: 'off' }, '不写 —— 只发评论，不生成日报文件'))),
 
         /* ── 环境与账号 ── */
-        h('div', { 'data-bd-sec': '' },
+        h('div', { 'data-bd-sec': '', 'data-bd-in': 'adv' },
           h('div', { 'data-bd-h': '' }, '环境与账号'),
           h('div', { 'data-bd-row': '' },
             h('button', { 'data-bd-btn': '', disabled: busy === 'install', onClick: onInstall },
@@ -790,7 +844,7 @@ window.__ModuleLoader__.load({
               '确认时选「记住我 / 长期」那张 —— 选 24 小时的话，明天就得重扫。')) : null),
 
         /* ── 它是怎么干活的（给他看的） ── */
-        h('div', { 'data-bd-sec': '' },
+        h('div', { 'data-bd-sec': '', 'data-bd-in': 'adv' },
           h('div', { 'data-bd-h': '' }, '它的地盘'),
           h('div', { 'data-bd-kv': '' },
             `家目录：${st.home}`,
@@ -808,14 +862,71 @@ window.__ModuleLoader__.load({
       )
     }
 
+    // ⭐ 会话页里的「刷过的视频」视图（2026-10-22）
+    //    她原话：不要塞在设置页，要像写作助手那样「在会话页面上多一个框」。
+    //    这里用官方的 conversation.view 座位（跟「聊天 / 轨迹」并列的一个视图）。
+    const 卡墙 = () => {
+      const [list, setList] = React.useState(null)
+      const [档, set档] = React.useState('all')
+      const [页, set页] = React.useState(0)
+      const 每页 = 12
+      React.useEffect(() => {
+        let 活 = true
+        fetch(API + '/cards', { credentials: 'same-origin' })
+          .then((r) => r.json())
+          .then((j) => { if (活) setList((j && j.cards) || []) })
+          .catch(() => { if (活) setList([]) })
+        return () => { 活 = false }
+      }, [])
+      const 全 = list || []
+      const 选 = 档 === 'all' ? 全 : 全.filter((c) => String(c['档'] || '') === 档)
+      const 页们 = Math.max(1, Math.ceil(选.length / 每页))
+      const 当前 = Math.min(页, 页们 - 1)
+      const 这页 = 选.slice(当前 * 每页, 当前 * 每页 + 每页)
+      const 换 = (k) => { set档(k); set页(0) }
+      return h('div', { style: { padding: '14px 16px', overflow: 'auto', height: '100%' } },
+        h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '10px' } },
+          h('div', { style: { fontWeight: 700, fontSize: '15px' } }, '刷过的视频'),
+          h('div', { style: { opacity: 0.6, fontSize: '12px' } }, '共 ' + 全.length + ' 条'),
+          ...[['all', '全部'], ['值得看', '值得看'], ['可以看', '可以看'], ['不值当', '不值当']].map(([k, 名]) =>
+            h('button', {
+              key: k, 'data-bd-btn': '',
+              style: 档 === k ? { fontWeight: 700 } : { opacity: 0.6 },
+              onClick: () => 换(k),
+            }, 名))),
+        list === null
+          ? h('div', { 'data-bd-note': '' }, '读取中…')
+          : (!这页.length
+            ? h('div', { 'data-bd-note': '' }, '还没有笔记 —— 跑一轮之后就有了')
+            : h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '12px' } },
+                ...这页.map((c) => h('div', {
+                  key: c.file,
+                  style: { border: '1px solid rgba(127,127,127,0.25)', borderRadius: '10px', overflow: 'hidden', background: 'rgba(127,127,127,0.06)' },
+                },
+                  c.cover ? h('img', {
+                    src: API + '/cover?u=' + encodeURIComponent(c.cover),
+                    alt: '', loading: 'lazy',
+                    style: { width: '100%', aspectRatio: '16 / 9', objectFit: 'cover', display: 'block' },
+                  }) : null,
+                  h('div', { style: { padding: '8px 10px 10px' } },
+                    h('div', { style: { fontSize: '12px', opacity: 0.65 } },
+                      (c.date || '') + '　' + c.bvid + (c['档'] ? '　【' + c['档'] + '】' : '')),
+                    h('div', { style: { fontWeight: 600, margin: '4px 0', lineHeight: 1.45 } }, c.title || '(没标题)'),
+                    c.why ? h('div', { style: { fontSize: '12px', opacity: 0.8, lineHeight: 1.55 } }, c.why) : null))))),
+        页们 > 1 ? h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '12px' } },
+          h('button', { 'data-bd-btn': '', disabled: 当前 <= 0, onClick: () => set页(当前 - 1) }, '上一页'),
+          h('div', { style: { fontSize: '12px', opacity: 0.7, alignSelf: 'center' } }, (当前 + 1) + ' / ' + 页们),
+          h('button', { 'data-bd-btn': '', disabled: 当前 >= 页们 - 1, onClick: () => set页(当前 + 1) }, '下一页')) : null)
+    }
+
     return {
       inject: ['slots'],
       apply(ctx) {
         const style = document.createElement('style')
-        style.setAttribute('data-plugin-css', 'dsh-bili-scroll')
+        style.setAttribute('data-plugin-css', 'dsh-bili-subagent')
         style.textContent = CSS
         document.head.appendChild(style)
-        ctx.effect(() => () => style.remove(), 'dsh-bili-scroll: 设置页样式')
+        ctx.effect(() => () => style.remove(), 'dsh-bili-subagent: 设置页样式')
 
         // ⭐ 进「设置」：label 就是左侧导航里那一项（抄 dsh-meme 的写法）
         const slots = (typeof ctx.get === 'function' ? ctx.get('slots') : undefined) || ctx.slots
@@ -823,6 +934,12 @@ window.__ModuleLoader__.load({
         slots.inject('settings.section', () => slots.register(
           { name: 'settings.section', id: 'bili-scroll', order: 30, label: '刷B站' },
           () => h(Panel),
+        ))
+
+        // ⭐ 会话页里那个框（跟「聊天 / 轨迹」并列的一个视图）
+        slots.inject('conversation.view', () => slots.register(
+          { name: 'conversation.view', id: 'bili-scroll-cards', order: 40, label: '视频' },
+          () => h(卡墙),
         ))
       },
     }

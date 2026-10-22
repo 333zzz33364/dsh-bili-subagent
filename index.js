@@ -1,5 +1,5 @@
 /**
- * dsh-bili-scroll —— host 半端
+ * dsh-bili-subagent —— host 半端
  * ============================================================================
  * 它是什么：每天替你刷一轮 B站 的插件版。
  *   1. **插件内部起那份 Python MCP**（`vendor/bilibili-mcp/mcp_server.py`），把它的能力
@@ -112,6 +112,25 @@ export const Config = !z ? undefined : z.object({
   minViews: z.natural().default(0).extra('volatile', true),
   /** ⭐ 门槛：发布不足这么多天的直接不返回给子代理（0 = 不过滤） */
   minAgeDays: z.natural().default(0).extra('volatile', true),
+  // ⚠️ 2026-10-22 补：下面这几个字段之前**漏在 schema 外**了（inbox 那批 + 三连那批）。
+  //    后果：设置页保存它们时，写 DSH 设置层会被拒（config.json 能存，但会报「写 DSH 设置失败」）。
+  //    以后再加配置字段，**记得同步这里**。
+  /** 收到的 @ 和回复：每轮顺手看一眼 */
+  inboxOn: z.boolean().default(true).extra('volatile', true),
+  /** 额外要理的人（逗号分隔 uid）；留空 = 谁都理 */
+  inboxUids: z.string().default('').extra('volatile', true),
+  /** 同一条只提醒一次 */
+  inboxOnceOnly: z.boolean().default(true).extra('volatile', true),
+  /** 没回的话最多提醒几次 */
+  inboxMaxRemind: z.natural().default(2).extra('volatile', true),
+  /** 一天最多回「别人」几条 */
+  inboxPerDay: z.natural().default(5).extra('volatile', true),
+  /** 三连模式：off / like / coin / fav / like_fav / triple */
+  tripleMode: z.string().default('off').extra('volatile', true),
+  /** 投币枚数 1~2 */
+  tripleCoin: z.natural().default(1).extra('volatile', true),
+  /** 每条视频写一份笔记 */
+  notesOn: z.boolean().default(true).extra('volatile', true),
 })
 
 /**
@@ -500,10 +519,18 @@ export function apply(ctx, config) {
             const m = /^(BV[0-9A-Za-z]{10})/.exec(段.trim())
             if (!m) continue
             const 路径 = join(笔记夹, m[1] + '-' + dayKey(new Date()) + '.md')
+            // ⭐ 顺手取封面地址（B站 公开接口，不用登录）；取不到就留空，不影响笔记
+            let 封面 = ''
+            try {
+              const vr = await fetch('https://api.bilibili.com/x/web-interface/view?bvid=' + m[1])
+              const vj = await vr.json()
+              封面 = String((vj && vj.data && vj.data.pic) || '')
+            } catch (e) {}
             try {
               writeFileSync(路径, '# ' + m[1] + String.fromCharCode(10, 10)
                 + '> 抓取时间：' + new Date().toISOString() + String.fromCharCode(10)
-                + '> 来源：自动刷 B 站第 ' + (Number(st.count) || 0) + ' 轮' + String.fromCharCode(10, 10)
+                + '> 来源：自动刷 B 站第 ' + (Number(st.count) || 0) + ' 轮' + String.fromCharCode(10)
+                + (封面 ? '> 封面：' + 封面 + String.fromCharCode(10) : '') + String.fromCharCode(10)
                 + '### ' + 段.trim() + String.fromCharCode(10), 'utf8')
             } catch (e) {}
           }
@@ -1422,6 +1449,31 @@ export function apply(ctx, config) {
       const r = await 自查更新.check(url.searchParams.get('refresh') === '1')
       return sendJson(res, 200, { ok: true, ...r })
     }
+    // ⭐ 封面代理（2026-10-22）：浏览器直接拉 i0.hdslb.com 会把使用者的 IP 交给图床。
+    //    这里由宿主代取 —— **只放行 B站 的图床域名**，别的地址一律拒（不然就成了公开代理）。
+    if (req.method === 'GET' && path === '/api/bili-duty/cover') {
+      const 原 = String(url.searchParams.get('u') || '')
+      const 白名单 = ['i0.hdslb.com', 'i1.hdslb.com', 'i2.hdslb.com']
+      let 目标 = null
+      try {
+        const u = new URL(原)
+        if (u.protocol === 'https:' && 白名单.indexOf(u.hostname) >= 0) 目标 = u
+      } catch (e) {}
+      if (!目标) { res.writeHead(400); return res.end('bad url') }
+      try {
+        const r = await fetch(目标, { headers: { referer: 'https://www.bilibili.com/' } })
+        if (!r.ok) { res.writeHead(502); return res.end('fetch failed ' + r.status) }
+        const buf = Buffer.from(await r.arrayBuffer())
+        res.writeHead(200, {
+          'content-type': r.headers.get('content-type') || 'image/jpeg',
+          'cache-control': 'public, max-age=86400',
+          'content-length': buf.length,
+        })
+        return res.end(buf)
+      } catch (e) {
+        res.writeHead(502); return res.end('fetch error')
+      }
+    }
     // ⭐ 卡片墙（2026-10-22）：把 reports/<BV>-<日期>.md 读成卡片列表
     if (req.method === 'GET' && path === '/api/bili-duty/cards') {
       const 夹 = join(outDir, 'reports')
@@ -1435,11 +1487,12 @@ export function apply(ctx, config) {
           try { text = readFileSync(join(夹, f), 'utf8') } catch (e) {}
           const 标题 = (/^#\s*BV\S+\s*\n+([^\n]+)/.exec(text) || [])[1] || ''
           const 档 = (/档位[：:]\s*(值得看|可以看|不值当)/.exec(text) || [])[1] || ''
+          const 封面 = (/^>\s*封面：(\S+)/m.exec(text) || [])[1] || ''
           const 为什么 = (/为什么值得[：:]\s*([^\n]+)/.exec(text) || [])[1] || ''
           cards.push({
             bvid: m[1], date: m[2], file: f,
             title: 标题.replace(/^#+\s*/, '').trim().slice(0, 80),
-            档: 档, why: 为什么.trim().slice(0, 200),
+            档: 档, why: 为什么.trim().slice(0, 200), cover: 封面,
           })
         }
       } catch (e) {}

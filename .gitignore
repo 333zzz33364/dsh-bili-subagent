@@ -9,3 +9,5 @@ Thumbs.db
 *.zst
 *.bak*
 *.orig
+__pycache__/
+*.pyc
