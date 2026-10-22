@@ -90,6 +90,12 @@
 
 ## 装
 
+在 DSH 里：**设置 → 插件 → 安装**，填这一行；或者命令行：
+
+```
+github:Yuuyuko-uu/dsh-bili-subagent
+```
+
 ```bash
 dsh plugin --profile desktop add github:Yuuyuko-uu/dsh-bili-subagent
 ```
@@ -100,6 +106,31 @@ dsh plugin --profile desktop add github:Yuuyuko-uu/dsh-bili-subagent
 > ⭐ 最省事的一条：把仓库链接贴给你自己的 dsh，说「**帮我装这个插件**」。
 
 ⚠️ 装完**必须重启一次 dsh**（插件在 bundle 层组装，不重启不生效）。然后进 **设置 → 刷B站**。
+
+### 装完起不来？先看这个
+
+如果 DSH 弹「The application could not start」，错误里有 `Unexpected token '﻿'`、`is not valid JSON`、
+`readProfileManifest` —— 那是 profile 的 `package.json` 被存成了 **UTF-8 带 BOM**。
+**跟插件无关**：内容都是对的，只是开头多了三个看不见的字节，DSH 读它就崩。
+
+先确认（`desktop` 换成你自己的档名）：
+
+```powershell
+Format-Hex "$env:USERPROFILE\.dsh\profiles\desktop\package.json" -Count 3
+```
+
+开头是 `EF BB BF` = 有 BOM。修（存成无 BOM）：
+
+```powershell
+$p = "$env:USERPROFILE\.dsh\profiles\desktop\package.json"
+[System.IO.File]::WriteAllText($p, [System.IO.File]::ReadAllText($p), (New-Object System.Text.UTF8Encoding($false)))
+```
+
+然后重启 DSH 就好，**数据一点没丢**。实在进不去时，那个错误框里的
+**「Disable third-party plugins, back up profile patch, and restart」** 能先起来，再一个个开回去定位。
+
+> ⚠️ 手动改 profile 里的文件，一律存 **UTF-8 无 BOM**。让 AI 帮你改时，别让它用
+> `Set-Content -Encoding UTF8` 或 `Out-File -Encoding utf8`（Windows 自带的这两个默认**带 BOM**）。
 
 ## 首次使用（两步）
 
