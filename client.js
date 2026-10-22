@@ -159,6 +159,7 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
       const [subModel, setSubModel] = React.useState(null)         // 派子代理用的 model
       const [ownerName, setOwnerName] = React.useState(null)       // 称呼
       const [scanPrompt, setScanPrompt] = React.useState(null)     // 子代理提示词
+      const [watchPrompt, setWatchPrompt] = React.useState(null)   // 定点看一条的提示词
       const [hintPrompt, setHintPrompt] = React.useState(null)     // 投递提示（发给伙伴看的那段）
       const [triggerPrompt, setTriggerPrompt] = React.useState(null) // 自动刷触发语
       const [cfgDefaults, setCfgDefaults] = React.useState(null)      // 服务端给的默认文案（「恢复默认」用）
@@ -205,6 +206,7 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
         if (cfg && inboxMaxRemind === null) setInboxMaxRemind(String(cfg.inboxMaxRemind ?? 2))
         if (cfg && inboxPerDay === null) setInboxPerDay(String(cfg.inboxPerDay ?? 5))
         if (cfg && scanPrompt === null) setScanPrompt(cfg.scanPrompt || '')
+        if (cfg && watchPrompt === null) setWatchPrompt(cfg.watchPrompt || '')
         if (cfg && hintPrompt === null) setHintPrompt(cfg.hintPrompt || '')
         if (cfg && triggerPrompt === null) setTriggerPrompt(cfg.triggerPrompt || '')
         if (cfg && targetSession === null) setTargetSession(cfg.targetSession || '')
@@ -705,6 +707,26 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
             onChange: (e) => setScanPrompt(e.target.value),
             onBlur: () => patch({ scanPrompt: String(scanPrompt || '') }, '子代理提示词'),
           }),
+          h('div', { 'data-bd-label': '' }, '定点看一条的提示词（你 @ 它、或者私信转给它那条时，派出去的子代理看这段）'),
+          h('div', { 'data-bd-note': '' }, '可用占位符：{bvid}=那条视频、{owner}=称呼。'),
+          h('textarea', {
+            'data-bd-input': '', rows: 6,
+            value: watchPrompt ?? '',
+            placeholder: '（默认已经填好；空的话点「恢复默认」）',
+            onChange: (e) => setWatchPrompt(e.target.value),
+            onBlur: () => patch({ watchPrompt: String(watchPrompt || '') }, '定点看一条的提示词'),
+          }),
+          h('div', { 'data-bd-row': '' },
+            h('button', {
+              'data-bd-btn': '',
+              onClick: () => {
+                const d = cfgDefaults && cfgDefaults.watchPrompt
+                if (!d) return
+                setWatchPrompt(d)
+                patch({ watchPrompt: d }, '定点看一条的提示词')
+              },
+            }, '恢复默认'),
+            h('span', { 'data-bd-note': '' }, '改坏了点这个，回到出厂那份')),
           h('div', { 'data-bd-label': '' }, '投递提示（发给伙伴看的那段：告诉它拿到报告后该怎么发评论/私信）'),
           h('div', { 'data-bd-note': '' },
             '框里就是现在的文案（默认那份已经填好了，直接改就行）。可用占位符：' +
