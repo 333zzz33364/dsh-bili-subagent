@@ -1397,6 +1397,89 @@ async def bili_unread_messages() -> str:
 
 # ========== Tool 23: 最近收到的回复 ==========
 
+
+@tool()
+async def bili_triple(bvid: str, mode: str = "like", coin_num: int = 1) -> str:
+    """给一个视频点赞 / 投币 / 收藏 / 一键三连。
+
+    Args:
+        bvid: 视频BV号（也接受纯数字 aid）
+        mode: like=只点赞 / coin=只投币 / fav=只收藏 / like_fav=点赞+收藏 / triple=一键三连
+        coin_num: 投币枚数（1 或 2，默认 1；只有 coin / triple 用到）
+
+    Returns:
+        JSON：做了什么、以及视频标题
+    """
+    cred = get_cred()
+    bvid = str(bvid or "").strip()
+    if bvid.isdigit():
+        try:
+            from bilibili_api.utils.aid_bvid_transformer import aid2bvid
+            bvid = str(aid2bvid(int(bvid)))
+        except Exception:
+            pass
+    v = video.Video(bvid=bvid, credential=cred)
+    info = await v.get_info()
+    title = str(info.get("title") or "")
+    mode = str(mode or "like").strip().lower()
+    做了 = []
+    跳过 = []
+
+    async def 点赞():
+        if await v.has_liked():
+            跳过.append("点赞（之前点过）")
+            return
+        await v.like(1)
+        做了.append("点赞")
+
+    async def 投币():
+        n = max(1, min(2, int(coin_num or 1)))
+        await v.pay_coin(n, False)
+        做了.append("投币 " + str(n) + " 枚")
+
+    async def 收藏():
+        if await v.has_favoured():
+            跳过.append("收藏（之前收过）")
+            return
+        from bilibili_api import favorite_list
+        mid = int(getattr(cred, "dedeuserid", 0) or 0)
+        fav_id = 0
+        try:
+            data = await favorite_list.get_favorite_list(up_id=mid, credential=cred)
+            for it in (data.get("list") or []):
+                if it.get("id"):
+                    fav_id = int(it["id"])
+                    break
+        except Exception as e:
+            raise RuntimeError("拿不到默认收藏夹：" + str(e))
+        if not fav_id:
+            raise RuntimeError("账号里没有可用的收藏夹")
+        await v.set_favorite(add_media_ids=[fav_id], del_media_ids=[])
+        做了.append("收藏（收藏夹 " + str(fav_id) + "）")
+
+    try:
+        if mode == "triple":
+            await v.triple()
+            做了.append("一键三连（赞+币+收藏）")
+        elif mode == "like":
+            await 点赞()
+        elif mode == "coin":
+            await 投币()
+        elif mode == "fav":
+            await 收藏()
+        elif mode == "like_fav":
+            await 点赞()
+            await 收藏()
+        else:
+            return json.dumps({"ok": False, "error": "不认识的 mode：" + mode}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"ok": False, "bvid": bvid, "title": title,
+                           "做了": 做了, "error": str(e)}, ensure_ascii=False)
+
+    return json.dumps({"ok": True, "bvid": bvid, "title": title, "mode": mode,
+                       "做了": 做了, "跳过": 跳过}, ensure_ascii=False)
+
+
 @tool()
 async def bili_received_replies() -> str:
     """

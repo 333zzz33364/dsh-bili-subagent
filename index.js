@@ -47,7 +47,7 @@ export const inject = ['webServer', 'tools', 'settings', 'subagents', 'agents', 
 //    （宁可少一个设置页，也不能因为一个 import 让整条插件不激活 ✗）
 
 // ⭐ 可配置的提示词模板（设置页能改；占位符：{owner}=主人称呼、{direction}=方向、{n}=条数）
-const SCAN_PROMPT_TMPL = '你去 B 站帮我转一圈，看看有什么值得看的。\n\n这次想看的：{direction}\n\n别急着下结论，按这个来：\n先搜一搜（**默认优先看近 7 天的**，按播放或最新都行），标题看着没意思的就跳过；\n⚠️ 「近 7 天」只是默认偏好，**不是硬门槛**：方向里点名了某条/某个时间的视频，就按点名的来，别拿「不在 7 天窗口内」当理由拒绝；确实要放宽，就先按点名的去找。\n有点意思的，再看看简介，判断值不值得点进去；\n觉得值得，就把它的字幕读一遍，弄清楚到底讲了什么——没字幕的就跳过；\n顺手翻翻评论区，看看大家真实怎么说。\n\n最后挑出最值得的，最多 {n} 条。每条都跟我说清楚：标题、BV号、讲了什么、为什么值得、评论区反响怎么样。\n\n⚠️ 每条第一行单独写「### BV号」，方便我统计。\n写完把报告交给我就行，不用替我发评论、也不用发私信——那些我自己来。'
+const SCAN_PROMPT_TMPL = '你去 B 站帮我转一圈，看看有什么值得看的。\n\n这次想看的：{direction}\n\n别急着下结论，按这个来：\n先搜一搜（**默认优先看近 7 天的**，按播放或最新都行），标题看着没意思的就跳过；\n⚠️ 「近 7 天」只是默认偏好，**不是硬门槛**：方向里点名了某条/某个时间的视频，就按点名的来，别拿「不在 7 天窗口内」当理由拒绝；确实要放宽，就先按点名的去找。\n有点意思的，再看看简介，判断值不值得点进去；\n觉得值得，就把它的字幕读一遍，弄清楚到底讲了什么——没字幕的就跳过；\n顺手翻翻评论区，看看大家真实怎么说。\n\n最后挑出最值得的，最多 {n} 条。每条都跟我说清楚：标题、BV号、讲了什么、为什么值得、评论区反响怎么样。\n每条再单独标一行「**档位：值得看 / 可以看 / 不值当**」（三选一，别写别的词），方便以后按档翻。\n\n⚠️ 每条第一行单独写「### BV号」，方便我统计。\n写完把报告交给我就行，不用替我发评论、也不用发私信——那些我自己来。'
 
 // ⭐ 自动刷触发语：到点时往「目标会话」里塞给伙伴的那一句（设置页可改）
 const TRIGGER_TMPL = '（到谷时啦，去 B 站刷一轮吧～想看什么方向你自己定，用 bili_scan 就行；刷完按设置，该发评论发评论、该发私信发私信。）'
@@ -200,6 +200,12 @@ export function apply(ctx, config) {
     inboxOnceOnly: true,  // 同一条只提醒一次（= 别人最多回 1 条）
     inboxMaxRemind: 2,    // 没回的话最多提醒几次，之后不再提
     inboxPerDay: 5,       // ⭐ 一天最多回「别人」几条 —— 防刷，也防她一天耗太多
+    // ⭐ 三连（2026-10-22 她要的）：给「这一轮最值得的那条」做点动作
+    //    off=不动 / like=只点赞 / coin=只投币 / fav=只收藏 / like_fav=点赞+收藏 / triple=一键三连
+    //    ⚠ 默认 off：别人装了不该莫名给视频点赞、更不该花人家的硬币
+    tripleMode: 'off',
+    tripleCoin: 1,        // 投币枚数（1 或 2）
+    notesOn: true,        // 每条视频写一份笔记（reports/<BV>-<日期>.md）
   }
   const normalize = (src, base) => {
     const out = { ...base }
@@ -234,6 +240,9 @@ export function apply(ctx, config) {
     if ('commentPerRound' in p) p.commentPerRound = Math.max(0, Math.min(Number(p.commentPerRound) || 0, 20))
     if ('minViews' in p) p.minViews = Math.max(0, Math.min(Number(p.minViews) || 0, 100000000))
     if ('minAgeDays' in p) p.minAgeDays = Math.max(0, Math.min(Number(p.minAgeDays) || 0, 365))
+    if ('tripleMode' in p) p.tripleMode = ['off','like','coin','fav','like_fav','triple'].includes(String(p.tripleMode)) ? String(p.tripleMode) : 'off'
+    if ('tripleCoin' in p) p.tripleCoin = Math.max(1, Math.min(Number(p.tripleCoin) || 1, 2))
+    if ('notesOn' in p) p.notesOn = Boolean(p.notesOn)
     return p
   }
 
@@ -446,7 +455,9 @@ export function apply(ctx, config) {
     const commentQuota = Math.max(0, Number(cfg.commentPerRound ?? 1))
     if (commentOn) pendingComment = { at: Date.now() }   // 记账：这轮欠一条评论
     const dmOn = Boolean(cfg.dmMode !== 'off' && Number(cfg.dmUid) > 0)
-    const 评论块 = '· **评论区 @（公开！除了 ' + owner + '，别人也看得到）**：这是**发**评论——必须用 `bili_reply` 工具真发一条，**不是**用 `bili_comment` 去读评论（读评论是子代理已经干过的事，跟这一步无关）。**设置里已经开着，直接调 bili_reply 就行，不用传 force**。最多发 ' + commentQuota + ' 条，内容**极短**：只点一个最有意思的点/梗，然后 @ ' + cfg.mentionName + '，勾她去看。别写长、别写私密的话（大家都能看到）。'
+    const 评论块 = '· **评论区 @（公开！除了 ' + owner + '，别人也看得到）**：这是**发**评论——必须用 `bili_reply` 工具真发一条，**不是**用 `bili_comment` 去读评论（读评论是子代理已经干过的事，跟这一步无关）。**设置里已经开着，直接调 bili_reply 就行，不用传 force**。最多发 ' + commentQuota + ' 条，内容**极短**：只点一个最有意思的点/梗。别写长、别写私密的话（大家都能看到）。'
+      + String.fromCharCode(10) + '  · 发新评论的话，末尾记得带上「@' + cfg.mentionName + '」—— 新评论 B站 不会自己加，不写就没人看得见。'
+      + String.fromCharCode(10) + '  · 回别人的评论（楼中楼）就别手打 @ 了，B站 会自己加「回复 @某某」。'
     const 私信块 = '· **私信（只 ' + owner + ' 一个人看）**：用 bili_send_message 发**详细版**——开头先叫一声「' + owner + '，」再往下说；标题、BV号、视频讲了啥都可以细说，给 UID ' + Number(cfg.dmUid) + '。'
     const 都要块 = '⚠️ **这两件都要做，别只做一件**：先调 `bili_reply` 把评论 @ 发了，再调 `bili_send_message` 发私信（没发评论之前，私信会被拒）。'
     const 都不要块 = '报告拿给你了，你自己看着跟' + owner + '聊。'
@@ -466,6 +477,40 @@ export function apply(ctx, config) {
       .split('\n').filter((x) => x.trim() !== '').join('\n')
     // ⭐ 每一轮的报告都写回报告文件（设置页「看报告」能回看）；「日报写多细=不写」时跳过
     if (level !== 'off') { try { appendFileSync(reportFileOf(), '\n\n---\n\n' + output + '\n', 'utf8') } catch {} }
+    // ⭐ 2026-10-22：抠出这一轮挑中的 BV —— ① 记「最值得的那条」（三连要用）
+    //    ② 每条写一份笔记（reports/<BV>-<日期>.md），以后能查「这条看过没、当时怎么说的」
+    try {
+      const bvs = []
+      for (const line of String(output).split(String.fromCharCode(10))) {
+        const m = /^#{1,6}\s*(BV[0-9A-Za-z]{10})/.exec(line.trim())
+        if (m && bvs.indexOf(m[1]) < 0) bvs.push(m[1])
+      }
+      if (bvs.length) {
+        const st = readJson(dutyStateFile, {})
+        st.lastTopBvid = bvs[0]
+        st.lastTopAt = new Date().toISOString()
+        st.lastBvs = bvs.slice(0, 20)
+        writeJson(dutyStateFile, st)
+        log('这一轮挑中 ' + bvs.length + ' 条，最值得的是 ' + bvs[0])
+        if (cfg.notesOn) {
+          const 笔记夹 = join(outDir, 'reports')
+          try { mkdirSync(笔记夹, { recursive: true }) } catch (e) {}
+          const 段们 = String(output).split(/^#{1,6}\s*(?=BV)/m)
+          for (const 段 of 段们) {
+            const m = /^(BV[0-9A-Za-z]{10})/.exec(段.trim())
+            if (!m) continue
+            const 路径 = join(笔记夹, m[1] + '-' + dayKey(new Date()) + '.md')
+            try {
+              writeFileSync(路径, '# ' + m[1] + String.fromCharCode(10, 10)
+                + '> 抓取时间：' + new Date().toISOString() + String.fromCharCode(10)
+                + '> 来源：自动刷 B 站第 ' + (Number(st.count) || 0) + ' 轮' + String.fromCharCode(10, 10)
+                + '### ' + 段.trim() + String.fromCharCode(10), 'utf8')
+            } catch (e) {}
+          }
+          log('笔记写好了：' + 笔记夹 + '（' + bvs.length + ' 条）')
+        }
+      }
+    } catch (e) { log('记笔记/记最值得那条失败（不影响这一轮）：' + (e?.message ?? e)) }
     return { ok: true, report: output, hint }
   }
 
@@ -578,7 +623,8 @@ export function apply(ctx, config) {
     name: 'bili_reply',
     description: '在视频下发一条评论，或回复某条评论（楼中楼）。短、干净、像人说的话。\n'
       + '⚠️ 回复别人的评论时**正文里不要手打 @** —— B站会自己加「回复 @某某」，你再加一遍就重复了。\n'
-      + '⚠️ 在别人视频下**发新评论**时，正文里写「@某人」只是纯文字，对方**收不到通知**；要让人真收到就用私信。\n'
+      + '🔴 **自己发新评论**（不带 rpid）：正文末尾**必须亲手带上「@要 @ 谁」** —— B站 新评论**不会**自动加 @，不写就没有。\n'
+      + '⚠️ 而**回别人的评论 / 楼中楼**（带 rpid）时，正文里**不要手打 @** —— B站 会自己加「回复 @某某」。\n'
       + '✅ 设置里开着「自动评论并 @ 你」、并且填了「要 @ 谁」时，**直接调就行，不用传 force**。\n'
       + '🔴 只有设置没开时才会拒绝；那种情况下要发才传 force: true。',
     parameters: {
@@ -617,6 +663,32 @@ export function apply(ctx, config) {
         if (j && j.success) markInboxReplied(String(args.bvid ?? ''), Number(args.rpid) || 0)
       } catch (e) { /* 记账失败不影响回复本身 */ }
       return r
+    },
+  })
+
+  tool({
+    name: 'bili_triple',
+    description: '给一个视频点赞 / 投币 / 收藏 / 一键三连。\n'
+      + '不传 bvid 就是「这一轮报告里排第一的那条」（最值得的那条）。\n'
+      + 'mode 不传就按设置里的「三连模式」。⚠️ 投币会**花账号里的硬币**，点过的会跳过、不重复。\n'
+      + '设置里三连模式是 off 时，这个工具会拒绝（要动就先去设置里选一个）。',
+    parameters: {
+      bvid: { type: 'string', description: 'BV号；不填 = 这一轮最值得的那条' },
+      mode: { type: 'string', description: 'like=只点赞 / coin=只投币 / fav=只收藏 / like_fav=点赞+收藏 / triple=一键三连；不填 = 按设置' },
+      coinNum: { type: 'number', description: '投币枚数 1 或 2（默认按设置）' },
+    },
+    async execute(args) {
+      let bvid = String(args?.bvid ?? '').trim()
+      if (!bvid) {
+        const st = readJson(dutyStateFile, {})
+        bvid = String(st.lastTopBvid || '').trim()
+        if (!bvid) return '还没有「这一轮挑中的视频」—— 先跑一轮 bili_scan'
+      }
+      const mode = String(args?.mode ?? '').trim() || String(cfg.tripleMode || 'off')
+      if (mode === 'off') return '设置里的「三连模式」是关着的（off）—— 要动就先去设置里选一个'
+      const coin = Math.max(1, Math.min(Number(args?.coinNum ?? cfg.tripleCoin ?? 1) || 1, 2))
+      log('三连：' + bvid + ' mode=' + mode + ' coin=' + coin)
+      return call('bili_triple', { bvid: bvid, mode: mode, coin_num: coin })
     },
   })
 
@@ -1349,6 +1421,30 @@ export function apply(ctx, config) {
     if (req.method === 'GET' && path === '/api/bili-duty/update') {
       const r = await 自查更新.check(url.searchParams.get('refresh') === '1')
       return sendJson(res, 200, { ok: true, ...r })
+    }
+    // ⭐ 卡片墙（2026-10-22）：把 reports/<BV>-<日期>.md 读成卡片列表
+    if (req.method === 'GET' && path === '/api/bili-duty/cards') {
+      const 夹 = join(outDir, 'reports')
+      const cards = []
+      try {
+        for (const f of readdirSync(夹)) {
+          if (!f.endsWith('.md')) continue
+          const m = /^(BV[0-9A-Za-z]{10})-(\d{4}-\d{2}-\d{2})\.md$/.exec(f)
+          if (!m) continue
+          let text = ''
+          try { text = readFileSync(join(夹, f), 'utf8') } catch (e) {}
+          const 标题 = (/^#\s*BV\S+\s*\n+([^\n]+)/.exec(text) || [])[1] || ''
+          const 档 = (/档位[：:]\s*(值得看|可以看|不值当)/.exec(text) || [])[1] || ''
+          const 为什么 = (/为什么值得[：:]\s*([^\n]+)/.exec(text) || [])[1] || ''
+          cards.push({
+            bvid: m[1], date: m[2], file: f,
+            title: 标题.replace(/^#+\s*/, '').trim().slice(0, 80),
+            档: 档, why: 为什么.trim().slice(0, 200),
+          })
+        }
+      } catch (e) {}
+      cards.sort((a, b) => String(b.date).localeCompare(String(a.date)) || a.bvid.localeCompare(b.bvid))
+      return sendJson(res, 200, { ok: true, count: cards.length, cards })
     }
     if (req.method === 'GET' && path === '/api/bili-duty/status') return sendJson(res, 200, status())
 

@@ -490,6 +490,68 @@ window.__ModuleLoader__.load({
             h('option', { value: '' }, '（不选 = 自动挑最近聊过的）'),
             ...((sessions || []).map((s) => h('option', { value: s.id }, s.title + '（' + s.id.slice(0, 14) + '…）'))))),
 
+        /* ── 它刷过的视频（卡片墙） ── */
+        h('div', { 'data-bd-sec': '' },
+          h('div', { 'data-bd-h': '' }, '它刷过的视频'),
+          h('div', { 'data-bd-note': '' }, '每条视频一份笔记（`reports/<BV>-<日期>.md`）。点「刷新」读出来看，以后能查「这条看过没、当时怎么说的」。'),
+          h('div', { 'data-bd-row': '' },
+            h('button', {
+              'data-bd-btn': '',
+              onClick: async () => {
+                const box = document.getElementById('bd-cards')
+                const 换行 = String.fromCharCode(10)
+                if (box) box.innerText = '读取中…'
+                try {
+                  const r = await jget('/cards')
+                  const cards = (r && r.cards) || []
+                  if (!cards.length) { if (box) box.innerText = '还没有笔记 —— 跑一轮之后就有了'; return }
+                  const 行们 = []
+                  for (const c of cards) {
+                    行们.push('· ' + (c.date || '') + '　' + c.bvid + (c['档'] ? '　【' + c['档'] + '】' : ''))
+                    if (c.title) 行们.push('   ' + c.title)
+                    if (c.why) 行们.push('   ' + c.why)
+                  }
+                  if (box) box.innerText = 行们.join(换行)
+                } catch (e) {
+                  if (box) box.innerText = '读不出来：' + ((e && e.message) || e)
+                }
+              },
+            }, '刷新')),
+          h('div', { id: 'bd-cards', 'data-bd-note': '', style: { whiteSpace: 'pre-wrap', lineHeight: '1.8', marginTop: '8px' } })),
+
+        /* ── 三连 ── */
+        h('div', { 'data-bd-sec': '' },
+          h('div', { 'data-bd-h': '' }, '要不要给视频点个赞'),
+          h('div', { 'data-bd-note': '' }, '刷完一轮，对**这一轮最值得的那条**做个动作。默认关着 —— 别人装了不该莫名给视频点赞，更不该花人家的硬币。'),
+          h('div', { 'data-bd-row': '' },
+            h('div', { 'data-bd-grow': '' },
+              h('div', { 'data-bd-label': '' }, '三连模式'),
+              h('div', { 'data-bd-note': '' }, '一键三连 = 点赞 + 投币 + 收藏；点过 / 收过的会自动跳过，不重复')),
+            h('select', {
+              'data-bd-input': '', value: String(cfg.tripleMode || 'off'),
+              onChange: (e) => patch({ tripleMode: e.target.value }, '三连模式'),
+            },
+              h('option', { value: 'off' }, '不动（默认）'),
+              h('option', { value: 'like' }, '只点赞'),
+              h('option', { value: 'coin' }, '只投币'),
+              h('option', { value: 'fav' }, '只收藏'),
+              h('option', { value: 'like_fav' }, '点赞 + 收藏'),
+              h('option', { value: 'triple' }, '一键三连（赞+币+收藏）'))),
+          h('div', { 'data-bd-sub': '' },
+            h('div', { 'data-bd-label': '' }, '投币枚数'),
+            h('input', {
+              'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 1, max: 2,
+              defaultValue: String(cfg.tripleCoin ?? 1),
+              onBlur: (e) => patch({ tripleCoin: Math.max(1, Math.min(Number(e.target.value) || 1, 2)) }, '投币枚数'),
+            }),
+            h('div', { 'data-bd-note': '' }, '1 或 2 枚。⚠️ 投币会**花账号里的硬币**，每天有上限。')),
+          h(ToggleRow, {
+            label: '每条视频写一份笔记',
+            note: '存在 reports/<BV>-<日期>.md，以后能查「这条看过没、当时怎么说的」',
+            on: cfg.notesOn !== false,
+            onChange: (v) => patch({ notesOn: v }, '每视频笔记'),
+          })),
+
         /* ── 收到的 @ 和回复 ── */
         h('div', { 'data-bd-sec': '' },
           h('div', { 'data-bd-h': '' }, '收到的 @ 和回复'),
