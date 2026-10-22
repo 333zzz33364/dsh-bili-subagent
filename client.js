@@ -591,7 +591,7 @@ window.__ModuleLoader__.load({
         /* ── 三连 ── */
         h('div', { 'data-bd-sec': '', 'data-bd-in': 'social' },
           h('div', { 'data-bd-h': '' }, '要不要给视频点个赞'),
-          h('div', { 'data-bd-note': '' }, '刷完一轮，对**这一轮最值得的那条**做个动作。默认关着 —— 别人装了不该莫名给视频点赞，更不该花人家的硬币。'),
+          h('div', { 'data-bd-note': '' }, '刷完一轮，自动给报告里标了「值得看」的那几条点一下。默认关着。'),
           h('div', { 'data-bd-sub': '' },
             h('div', { 'data-bd-label': '' }, '三连模式'),
             h('select', {
@@ -602,7 +602,7 @@ window.__ModuleLoader__.load({
               h('option', { value: 'like' }, '只点赞'),
               h('option', { value: 'fav' }, '只收藏'),
               h('option', { value: 'like_fav' }, '点赞 + 收藏')),
-            h('div', { 'data-bd-note': '' }, '一键三连 = 点赞 + 投币 + 收藏；点过 / 收过的会自动跳过，不重复')),
+            h('div', { 'data-bd-note': '' }, '点过、收过的会自动跳过，不重复')),
           h(ToggleRow, {
             label: '每条视频写一份笔记',
             note: '存在 reports/<BV>-<日期>.md，以后能查「这条看过没、当时怎么说的」',
@@ -613,7 +613,7 @@ window.__ModuleLoader__.load({
         /* ── 收到的 @ 和回复 ── */
         h('div', { 'data-bd-sec': '', 'data-bd-in': 'social' },
           h('div', { 'data-bd-h': '' }, '收到的 @ 和回复'),
-          h('div', { 'data-bd-note': '' }, '每轮刷之前顺手看一眼：有人 @ 了你、或者回了你的评论，就把内容**递到伙伴手上，让她自己看、自己决定回不回** —— 插件不替她说话，也不打分。默认谁都理（想只看某几个人，就填下面的「还要理谁」）。'),
+          h('div', { 'data-bd-note': '' }, '每轮刷之前顺手看一眼：有人 @ 你、回了你的评论、或者私信转给你视频，就把内容递到伙伴手上，由她自己决定回不回。想只看某几个人，就在下面填「还要理谁」。'),
           h(ToggleRow, {
             label: '每轮顺手看一眼 @ 和回复',
             note: '关掉就完全不看（别人的乱 @ 从来不看）',

@@ -50,6 +50,16 @@ export const inject = ['webServer', 'tools', 'settings', 'subagents', 'agents', 
 const SCAN_PROMPT_TMPL = '你去 B 站帮我转一圈，看看有什么值得看的。\n\n这次想看的：{direction}\n\n别急着下结论，按这个来：\n先搜一搜（**默认优先看近 7 天的**，按播放或最新都行），标题看着没意思的就跳过；\n⚠️ 「近 7 天」只是默认偏好，**不是硬门槛**：方向里点名了某条/某个时间的视频，就按点名的来，别拿「不在 7 天窗口内」当理由拒绝；确实要放宽，就先按点名的去找。\n有点意思的，再看看简介，判断值不值得点进去；\n觉得值得，就把它的字幕读一遍，弄清楚到底讲了什么——没字幕的就跳过；\n顺手翻翻评论区，看看大家真实怎么说。\n\n最后挑出最值得的，最多 {n} 条。每条都跟我说清楚：标题、BV号、讲了什么、为什么值得、评论区反响怎么样。\n每条再单独标一行「**档位：值得看 / 可以看 / 不值当**」（三选一，别写别的词），方便以后按档翻。\n\n⚠️ 每条第一行单独写「### BV号」，方便我统计。\n写完把报告交给我就行，不用替我发评论、也不用发私信——那些我自己来。'
 
 // ⭐ 自动刷触发语：到点时往「目标会话」里塞给伙伴的那一句（设置页可改）
+// ⭐ 定点看一条（2026-10-22）：@ 她的、或她私信转发给她的那条视频，**不是**"帮我刷/帮我挑"，
+//    而是"就这一条，你去看完回来告诉我"。跟 scanPrompt 是两套，别混。
+const WATCH_TMPL = '去看这一条视频：{bvid}\n\n'
+  + '这是{owner}专门给我的（她 @ 我、或者私信转给我），**只看这一条**，不用搜别的、也不用挑。\n'
+  + '按这个来：先把它的字幕读一遍（没字幕就翻评论区、看简介），弄清楚它到底讲了什么；\n'
+  + '再翻翻评论区，看大家真实在说什么。\n\n'
+  + '回来就跟我说这几件：① 它讲了什么（两三句，别复述全文）② 值不值得看、为什么 ③ 评论区什么反应。\n'
+  + '⚠️ 每条第一行写「### {bvid}」，方便我统计。\n'
+  + '看完把报告交给我就行 —— 发不发评论、发不发私信，我自己来。'
+
 const TRIGGER_TMPL = '（到谷时啦，去 B 站刷一轮吧～想看什么方向你自己定，用 bili_scan 就行；刷完按设置，该发评论发评论、该发私信发私信。）'
 
 // ⭐ 投递提示的**默认模板**：设置页直接把这个当默认值填在框里（不是留空！）
@@ -108,6 +118,8 @@ export const Config = !z ? undefined : z.object({
   hintPrompt: z.string().default(HINT_TMPL).extra('volatile', true),
   /** ⭐ 自动刷触发语（到点塞进目标会话的那句）——可改，{owner}=称呼 */
   triggerPrompt: z.string().default(TRIGGER_TMPL).extra('volatile', true),
+  /** ⭐ 定点看一条（@ 她 / 私信转发的）用的提示词，占位符 {bvid} {owner} */
+  watchPrompt: z.string().default(WATCH_TMPL).extra('volatile', true),
   /** ⭐ 门槛：播放量低于这个数的直接不返回给子代理（0 = 不过滤） */
   minViews: z.natural().default(0).extra('volatile', true),
   /** ⭐ 门槛：发布不足这么多天的直接不返回给子代理（0 = 不过滤） */
@@ -211,6 +223,7 @@ export function apply(ctx, config) {
     scanPrompt: SCAN_PROMPT_TMPL,
     hintPrompt: HINT_TMPL,
     triggerPrompt: TRIGGER_TMPL,
+    watchPrompt: WATCH_TMPL,   // ⭐ 定点看一条（@ 她 / 私信转发的）用的提示词
     minViews: 0,      // 播放量低于这个数的不给子代理看（0 = 不过滤）
     minAgeDays: 0,    // 发布不足这么多天的不给子代理看（0 = 不过滤）
     // ⭐ 收到的 @ 和回复：每轮顺手看一眼，把内容**递给伙伴本人**，回不回她自己定
@@ -414,7 +427,7 @@ export function apply(ctx, config) {
   // ⭐ 这一轮「该发但还没发」的评论：没发评论就不让发私信（模型老跳过评论，只能硬约束）
   let pendingComment = null
 
-  const scanWith = async (parent, direction, exec) => {
+  const scanWith = async (parent, direction, exec, bvid = '') => {
     const dir = String(direction || '').trim()
       || (Array.isArray(cfg.keywords) ? cfg.keywords.filter(Boolean).join(' ') : '')
       || '最近有什么值得看的'
@@ -431,7 +444,10 @@ export function apply(ctx, config) {
       : (level === 'off'
         ? '\n\n⚠️ 报告形态：**不写详细报告** —— 直接给大肥鱼一段简短的口头总结（挑中哪几条、各自一句），不用逐条展开。'
         : '')
-    const prompt = String(cfg.scanPrompt || SCAN_PROMPT_TMPL)
+    const 定点 = String(bvid || '').trim()
+    const prompt = (定点
+      ? String(cfg.watchPrompt || WATCH_TMPL).split('{bvid}').join(定点)
+      : String(cfg.scanPrompt || SCAN_PROMPT_TMPL))
       .split('{owner}').join(owner)
       .split('{direction}').join(dir)
       .split('{n}').join(String(perRound)) + levelLine
@@ -584,21 +600,23 @@ export function apply(ctx, config) {
     return { ok: true, report: output, hint: 三连结果 ? (hint + String.fromCharCode(10) + '（报告里值得看的那几条，我顺手点过了：' + 三连结果 + '）') : hint }
   }
 
-  const doScan = async (direction, exec) => {
+  const doScan = async (direction, exec, bvid = '') => {
     const parent = ctx.agents?.currentInitiator?.()
     if (!parent) return { ok: false, error: '没拿到发起刷 B 站的会话（要在对话里用）' }
-    return scanWith(parent, direction, exec)
+    return scanWith(parent, direction, exec, bvid)
   }
 
   tool({
     name: 'bili_scan',
     description: '派一个子代理去刷 B 站：按你想看的方向搜视频、读字幕原文、把值得的挑出来，看完把内容汇报给你。\n'
-      + '大肥鱼（或你）说「帮我刷下 XX 方向」就能触发；子代理模型可在设置页选。',
+      + '大肥鱼（或你）说「帮我刷下 XX 方向」就能触发；子代理模型可在设置页选。'
+      + '如果只想看**某一条**（比如她 @ 你的、或私信转给你的），传 bvid —— 那就只读那一条，不搜不挑。',
     parameters: {
       direction: { type: 'string', description: '想刷什么方向 / 主题 / 关键词，一句话或几个词' },
+      bvid: { type: 'string', description: '可选。给了 BV号就是「定点看这一条」（@ 我的、或私信转给我的那条）：只看它、不搜不挑' },
     },
     async execute(args, exec) {
-      return doScan(args?.direction, exec)
+      return doScan(args?.direction, exec, String(args?.bvid ?? '').trim())
     },
   })
 
@@ -1039,6 +1057,36 @@ export function apply(ctx, config) {
     }
     await 拉一个('bili_received_at_and_likes')
     await 拉一个('bili_received_replies')
+    // ⭐ 第三路：私信（2026-10-22）—— 她 @ 完还能直接把视频转发给「我」，
+    //    只认名单里那几个人发的（默认就是「私信 UID」那个号＝她本人）；别人发的记一条日志、不理。
+    //    ⚠️ 一次分享多条要**全抽**，不能只取最近一条。
+    try {
+      const 名单 = []
+      const 我 = Number(cfg.dmUid || 0)
+      if (我 > 0) 名单.push(我)
+      for (const x of String(cfg.inboxUids || '').split(/[,，\s]+/)) {
+        if (/^\d+$/.test(x)) 名单.push(Number(x))
+      }
+      let 陌生人 = 0
+      for (const uid of [...new Set(名单)]) {
+        try {
+          const raw = await call('bili_dm_recent', { size: 20, talker_id: uid })
+          const j = typeof raw === 'string' ? JSON.parse(raw) : raw
+          for (const m of (j && j.items) || []) {
+            if (Number(m.from_uid) !== uid) { 陌生人++; continue }   // 别人发的一律不理
+            const bv = String(m.bv || '')
+            if (!bv) continue                                       // 没视频的私信先不管
+            items.push({
+              kind: 'dm', id: String(m.key || bv), mid: uid,
+              nickname: '你私信转发的', bvid: bv,
+              content: String(m.text || '').slice(0, 120),
+              rpid: 0, root: 0, at: Number(m.ts) || 0,
+            })
+          }
+        } catch (e) { log('收件箱：私信（' + uid + '）读失败 ' + (e?.message ?? e)) }
+      }
+      if (陌生人) log('收件箱：私信里有 ' + 陌生人 + ' 条不是名单里的人发的，没理')
+    } catch (e) { log('收件箱：私信那一路出错 ' + (e?.message ?? e)) }
     return items
   }
 
@@ -1143,6 +1191,12 @@ export function apply(ctx, config) {
     const 自己 = Number(cfg.dmUid || 0)
     const 行 = (it) => {
       const 谁 = it.nickname || ('UID ' + it.mid)
+      const 是私信 = it.kind === 'dm'
+      if (是私信) {
+        const 话0 = String(it.content || '').replace(/\s+/g, ' ').slice(0, 120)
+        // 私信那条只说「你把这条转给我了」—— 不套「在…下面 …了你」，也不显示 rpid（私信没有）
+        return '· 你私信转给我一条视频：「' + 话0 + '」' + String.fromCharCode(10) + '  ' + it.bvid
+      }
       const 哪 = it.title ? '《' + it.title + '》下面' : '一个视频下面'
       const 啥 = it.kind === 'reply' ? '回了你的评论' : '@ 了你'
       const 话 = String(it.content || '').replace(/\s+/g, ' ').slice(0, 120)

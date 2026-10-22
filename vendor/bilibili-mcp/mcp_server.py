@@ -1,3 +1,4 @@
+#      ⑩ `bili_dm_recent` 读私信（分享卡片 msg_type=7/8 要特殊解析；不做身份过滤，交给宿主）
 #!/usr/bin/env python3
 """
 Bilibili MCP Server
@@ -1486,6 +1487,96 @@ async def bili_triple(bvid: str, mode: str = "like", coin_num: int = 1) -> str:
 
     return json.dumps({"ok": True, "bvid": bvid, "title": title, "mode": mode,
                        "做了": 做了, "跳过": 跳过}, ensure_ascii=False)
+
+
+
+def _dm_get(url: str):
+    """私信接口在老的 vc 域名上，不属于 bilibili_api 的封装 —— 用标准库 urllib 带凭证 cookie 取。
+    ⚠️ 这个 venv 里没有 requests（实测 ModuleNotFoundError），所以别引入新依赖。"""
+    import urllib.request
+    cred = get_cred()
+    cookies = cred.get_cookies() or {}
+    cookie = "; ".join(str(k) + "=" + str(v) for k, v in cookies.items())
+    req = urllib.request.Request(url, headers={
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "referer": "https://message.bilibili.com/",
+        "cookie": cookie,
+    })
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read().decode("utf-8", "ignore"))
+
+
+@tool()
+async def bili_dm_recent(size: int = 20, talker_id: int = 0) -> str:
+    """读最近收到的私信（**不做身份过滤**，谁发的都原样返回，由宿主按名单筛）。
+
+    Args:
+        size: 读多少条（1~30，默认 20）
+        talker_id: 读哪个会话（0 = 发给自己那条）。⚠️ 别人转发给你的，要填**对方的 uid**
+
+    Returns:
+        JSON：{ok, me, talker, count, items:[{key, ts, from_uid, bv, text, is_card}]}
+        ⚠️ 分享卡片（msg_type=7/8）在 B站 的 content 里**没有 content 字段**，
+           只有 bvid / jump_url / title / author —— 不特殊处理就会被当成空消息丢掉。
+    """
+    cred = get_cred()
+    me = int(getattr(cred, "dedeuserid", 0) or 0)
+    n = max(1, min(30, int(size or 20)))
+    if int(talker_id or 0):
+        talker = int(talker_id)
+    else:
+        talker = me
+        try:
+            d0 = _dm_get("https://api.vc.bilibili.com/session_svr/v1/session_svr/get_sessions"
+                         "?session_type=1&group_id=0&build=0&mobi_app=web")
+            for it in ((d0.get("data") or {}).get("session_list") or []):
+                tid = int((it.get("talker_id") or 0))
+                if tid and tid == me:
+                    talker = tid
+                    break
+        except Exception:
+            pass
+    url = ("https://api.vc.bilibili.com/svr_sync/v1/svr_sync/fetch_session_msgs"
+           "?talker_id=" + str(talker) + "&session_type=1&size=" + str(n) + "&build=0&mobi_app=web")
+    d = _dm_get(url)
+    msgs = ((d.get("data") or {}).get("messages") or [])
+    import re as _re
+    out = []
+    for m in reversed(msgs):
+        mt = int(m.get("msg_type") or 1)
+        try:
+            c = json.loads(m.get("content") or "{}")
+        except Exception:
+            c = {}
+        bv = ""
+        is_card = False
+        if mt in (7, 8) and (c.get("jump_url") or c.get("bvid") or c.get("author") or c.get("title")):
+            is_card = True
+            bv = str(c.get("bvid") or "")
+            if not bv:
+                mm = _re.search(r"BV[0-9A-Za-z]{10}", str(c.get("jump_url") or ""))
+                bv = mm.group(0) if mm else ""
+            text = "[分享视频] " + str(c.get("title") or c.get("headline") or "")[:80] \
+                   + ((" / " + str(c.get("author"))) if c.get("author") else "") \
+                   + ((" " + bv) if bv else "")
+        else:
+            text = str(c.get("content") or c.get("text") or "")
+            if not bv:
+                mm = _re.search(r"BV[0-9A-Za-z]{10}", text)
+                bv = mm.group(0) if mm else ""
+        if not text and not bv:
+            continue
+        out.append({
+            "key": str(m.get("msg_key") or m.get("msg_seqno") or m.get("timestamp")),
+            "ts": int(m.get("timestamp") or 0),
+            "from_uid": int(m.get("sender_uid") or 0),
+            "bv": bv,
+            "text": text[:300],
+            "is_card": is_card,
+        })
+    return json.dumps({"ok": True, "me": me, "talker": talker, "count": len(out), "items": out},
+                      ensure_ascii=False)
 
 
 @tool()
