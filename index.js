@@ -107,15 +107,15 @@ export const Config = !z ? undefined : z.object({
   /** 日报形态：full=完整（现状）· brief=每条一两行 · off=不写报告（只发评论） */
   reportLevel: z.string().default('full').extra('volatile', true),
   /** ⭐ 派子代理刷 B 站用的 provider（默认用主人自己 API 里的，避用官方 key） */
-  subProvider: z.string().default('apii').extra('volatile', true),
+  subProvider: z.string().default('').extra('volatile', true),
   /** ⭐ 派子代理刷 B 站用的模型 */
-  subModel: z.string().default('deepseek-v4-pro').extra('volatile', true),
+  subModel: z.string().default('').extra('volatile', true),
   /** 每次（每轮）最多挑几条（一次挑一条更清爽，默认 1） */
   perScan: z.natural().default(1).extra('volatile', true),
   /** ⭐ 自动刷在哪个会话触发（留空 = 自动挑最近聊过的那个会话） */
   targetSession: z.string().default('').extra('volatile', true),
   /** ⭐ 主人的称呼（提示词里所有「小鱿鱼」都跟这个走） */
-  ownerName: z.string().default('小鱿鱼').extra('volatile', true),
+  ownerName: z.string().default('你').extra('volatile', true),
   /** ⭐ 子代理的人设+流程提示词（占位符 {owner}/{direction}/{n}） */
   scanPrompt: z.string().default(SCAN_PROMPT_TMPL).extra('volatile', true),
   /** ⭐ 投递提示（发给伙伴看的那段）——空 = 用内置那套默认；可整段改，占位符见 HINT_PLACEHOLDERS */
@@ -220,10 +220,10 @@ export function apply(ctx, config) {
     perDay: 5, gapHours: 3, gapMin: 180, autoMode: 'manual', peakValley: false, noon: true, night: true, autoComment: false,
     dmMode: 'off', dmUid: 0,
     keywords: [], commentPerRound: 1, mentionName: '', pythonPath: 'python', reportLevel: 'full',
-    subProvider: 'apii', subModel: 'deepseek-v4-pro',
+    subProvider: '', subModel: '',
     perScan: 1,
     targetSession: '',
-    ownerName: '小鱿鱼',
+    ownerName: '你',
     scanPrompt: SCAN_PROMPT_TMPL,
     hintPrompt: HINT_TMPL,
     triggerPrompt: TRIGGER_TMPL,
@@ -477,7 +477,7 @@ export function apply(ctx, config) {
     // 手动刷不占「每天几条」的额度（那是自动刷的账）；每次最多挑这么几条
     const perRound = Math.max(1, Number(cfg.perScan || 1))
 
-    const owner = String(cfg.ownerName || '小鱿鱼')
+    const owner = String(cfg.ownerName || '你')
     const level = String(cfg.reportLevel || 'full')
     const levelLine = level === 'brief'
       ? '\n\n⚠️ 报告形态：**薄** —— 每条只写一两行（标题 + BV号 + 一句值不值得），不要展开细讲。'
@@ -498,13 +498,17 @@ export function apply(ctx, config) {
 
     let run
     try {
+      // ⭐ 2026-10-22：原来这里写死 provider 'apii' —— 别人机器上没这个 provider，
+      //    自动刷一派子代理就失败。现在**两个都填了才指定**，留空就跟当前会话用一样的。
+      const 子provider = String(cfg.subProvider || '').trim()
+      const 子model = String(cfg.subModel || '').trim()
       run = await ctx.subagents.startActivation({
         provider: 'spawn',
         label: '刷B站：' + dir.slice(0, 20),
         request: {
           prompt: [{ type: 'text', text: prompt }],
           parent,
-          agentOptions: { provider: String(cfg.subProvider || 'apii'), model: String(cfg.subModel || 'deepseek-v4-pro') },
+          ...(子provider && 子model ? { agentOptions: { provider: 子provider, model: 子model } } : {}),
         },
         signal: exec?.signal || new AbortController().signal,
         delivery: 'caller',

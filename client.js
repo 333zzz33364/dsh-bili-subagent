@@ -199,9 +199,9 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
         if (cfg && mention === null) setMention(cfg.mentionName || '')
         if (cfg && dmUid === null) setDmUid(cfg.dmUid ? String(cfg.dmUid) : '')
         if (cfg && dmMode === null) setDmMode(cfg.dmMode || 'off')
-        if (cfg && subProvider === null) setSubProvider(cfg.subProvider || 'apii')
-        if (cfg && subModel === null) setSubModel(cfg.subModel || 'deepseek-v4-pro')
-        if (cfg && ownerName === null) setOwnerName(cfg.ownerName || '小鱿鱼')
+        if (cfg && subProvider === null) setSubProvider(cfg.subProvider || '')
+        if (cfg && subModel === null) setSubModel(cfg.subModel || '')
+        if (cfg && ownerName === null) setOwnerName(cfg.ownerName || '你')
         if (cfg && inboxUids === null) setInboxUids(String(cfg.inboxUids || ''))
         if (cfg && inboxMaxRemind === null) setInboxMaxRemind(String(cfg.inboxMaxRemind ?? 2))
         if (cfg && inboxPerDay === null) setInboxPerDay(String(cfg.inboxPerDay ?? 5))
@@ -563,6 +563,7 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
                   patch({ subProvider: v, subModel: first }, '子代理 provider')
                 },
               },
+                h('option', { value: '' }, '（跟当前会话一样）'),
                 ...((models || []).map((p) => h('option', { value: p.id }, (p.name || p.id) + '（' + p.id + '）')))))),
           h('div', { 'data-bd-row': '' },
             h('div', { 'data-bd-grow': '' },
@@ -698,7 +699,7 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
                 'data-bd-input': '', value: ownerName ?? '',
                 placeholder: '比如：小鱼',
                 onChange: (e) => setOwnerName(e.target.value),
-                onBlur: () => patch({ ownerName: String(ownerName || '').trim() || '小鱿鱼' }, '称呼'),
+                onBlur: () => patch({ ownerName: String(ownerName || '').trim() || '你' }, '称呼'),
               }))),
           h('div', { 'data-bd-label': '' }, '子代理提示词（占位符 {owner}=称呼、{direction}=方向、{n}=条数）'),
           h('textarea', {
