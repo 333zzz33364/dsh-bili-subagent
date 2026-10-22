@@ -61,18 +61,20 @@
 
 ## 自动刷是怎么触发的
 
-编排器每 **60 秒**看一次表，四件事**同时成立**才跑：
+编排器每 **60 秒**看一次表，几件事**同时成立**才跑：
 
-1. 「峰谷时段自动刷」开着
+1. **自动刷时段**不是「只手动」（三档：只手动 / 只在谷时 / 全天都跑）
 2. 今天自动刷的轮数 **< 每天最多自动刷几轮**
-3. 现在落在某个窗口里：中午 **12:00–14:00** 或 夜间 **18:00–09:00**
-4. 离上一轮已经隔够 **两轮之间至少隔几小时**（默认 3）
+3. 「只在谷时」时，现在得落在某个窗口里：中午 **12:00–14:00** 或 夜间 **18:00–09:00**；**整个周末整天都算谷时**（「全天都跑」不看这条）
+4. 离上一轮已经隔够 **两轮之间至少隔几分钟**（默认 180 分钟 = 3 小时）
 
-举例：设「每天 5 轮」「间隔 3 小时」，晚上那一轮会这样走 ——
+举例：设「每天 5 轮」「间隔 180 分钟」，晚上那一轮会这样走 ——
 
 ```
 18:00 → 21:00 → 00:00 → 03:00 → 06:00   （5 轮用完就停）
 ```
+
+想跑得密（比如周末狂刷）：把间隔调到 **5 分钟**、每天轮数调到 50 —— 一分钟一跳的表照样能一轮接一轮地来。
 
 ⚠️ **没投出去不算数**：目标会话没醒着、或者派子代理失败，这一轮的额度会**退回去**，下一个周期还能重试。
 
@@ -113,16 +115,27 @@ dsh plugin --profile desktop add github:Yuuyuko-uu/dsh-bili-subagent
 `readProfileManifest` —— 那是 profile 的 `package.json` 被存成了 **UTF-8 带 BOM**。
 **跟插件无关**：内容都是对的，只是开头多了三个看不见的字节，DSH 读它就崩。
 
-先确认（`desktop` 换成你自己的档名）：
+**先找出来**（不同装法位置不一样，别猜 —— 真正的 profile 目录里同时有 `cordis.yml`、`cordis.patch.yml`、`package.json`；机器上别处那些同名的都不算）：
 
 ```powershell
-Format-Hex "$env:USERPROFILE\.dsh\profiles\desktop\package.json" -Count 3
+Get-ChildItem C:\,D:\,E:\ -Directory -Filter profiles -Recurse -Depth 4 -ErrorAction SilentlyContinue |
+  ForEach-Object {
+    Get-ChildItem $_.FullName -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+      $p = Join-Path $_.FullName 'package.json'
+      if ((Test-Path (Join-Path $_.FullName 'cordis.patch.yml')) -and (Test-Path $p)) {
+        $b = [System.IO.File]::ReadAllBytes($p)
+        $bom = ($b.Length -ge 3 -and $b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF)
+        "{0}   BOM={1}" -f $p, $bom
+      }
+    }
+  }
 ```
 
-开头是 `EF BB BF` = 有 BOM。修（存成无 BOM）：
+**输出里 `BOM=True` 的那一行，就是要修的文件**（标准安装在 `C:\Users\<你>\.dsh\profiles\<档名>\package.json`）。
+去掉 BOM（路径换成上面那一行）：
 
 ```powershell
-$p = "$env:USERPROFILE\.dsh\profiles\desktop\package.json"
+$p = "把上面 BOM=True 那一行的路径粘到这里"
 [System.IO.File]::WriteAllText($p, [System.IO.File]::ReadAllText($p), (New-Object System.Text.UTF8Encoding($false)))
 ```
 
@@ -144,7 +157,7 @@ $p = "$env:USERPROFILE\.dsh\profiles\desktop\package.json"
 
 | 区块 | 说明 |
 |---|---|
-| **什么时候自己跑** | 峰谷总开关；打开后才展开「中午谷时 12:00–14:00」「晚上/夜间谷时 18:00–09:00」，再加一个**两轮之间至少隔几小时**（默认 3 小时）。窗口里按这个节奏一轮一轮轮转，**跑到「每天最多自动刷几轮」用完为止**；手动跑不受间隔限制。依据 DeepSeek 定价：工作日 9:00–12:00、14:00–18:00 是高峰，其余（含整个周末）都是谷时 |
+| **什么时候自己跑** | 三档：**只手动 / 只在谷时 / 全天都跑**。「只在谷时」时会展开「中午谷时 12:00–14:00」「晚上/夜间谷时 18:00–09:00」两个勾选框；只要是自动（不是只手动），下面还有一个**两轮之间至少隔几分钟**（默认 180，最少 5、最多 720）。按这个节奏一轮一轮轮转，**跑到「每天最多自动刷几轮」用完为止**；手动跑不受间隔限制。谷时口径依据 DeepSeek 定价：工作日 9:00–12:00、14:00–18:00 是高峰，其余（**含整个周末**）都是谷时 |
 | **派子代理刷的模型** | 选 provider + 模型（联动下拉，选中即存）。默认 `apii / deepseek-v4-pro`；**指到免费或便宜的中转，就不花官方额度的钱** |
 | **自动刷在哪个会话** | 到点时往哪个会话里递话。**不选 = 自动挑最近聊过的那个**；连一个都没有才临时新建（用完自动释放） |
 | **提示词（可改）** | **三段都能自己写，留空都 = 用内置默认**：① **子代理提示词**（派出去的子代理看；`{owner}` `{direction}` `{n}`）；② **投递提示**（报告交回时附给伙伴看，告诉它怎么发评论/私信；`{owner}` `{mention}` `{commentQuota}` `{uid}` `{commentBlock}` `{dmBlock}`）；③ **自动刷触发语**（到点塞进目标会话的那一句；`{owner}`）。「称呼」改了，三段里的名字一起变 |
@@ -188,7 +201,7 @@ $p = "$env:USERPROFILE\.dsh\profiles\desktop\package.json"
 ## 费用
 
 - **子代理走你选的那个模型**：指到免费/便宜的中转，这一轮就不花官方额度的钱。
-- **自动刷只在谷时触发**（填 0 = 不自动跑，只手动跑）。
+- **自动刷默认只在谷时触发**（也能选「全天都跑」，那就是高峰时段也花）；「每天最多自动刷几轮」填 0 = 不自动跑，只手动跑。
 - **手动「现在跑一轮」不占额度**。
 - ⚠️ 已知小缺陷：自动刷的额度在**触发那一刻**就 +1，那一轮失败也占额度。
 - 改设置**不影响** DSH 的前缀缓存，不额外花钱。

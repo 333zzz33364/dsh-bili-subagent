@@ -73,6 +73,8 @@ window.__ModuleLoader__.load({
   background:var(--dsw-alias-bg-overlay,rgba(128,128,128,.12));color:inherit;font-family:inherit;}
 [data-bd-input]:focus{outline:none;border-color:#3b82f6;}
 [data-bd-num]{width:88px;text-align:center;}
+/* ⭐ 下拉框别去吃 width:100% —— 否则同一行里「说明文字」那一栏被挤成一条竖线（2026-10-22 主人指出） */
+select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
 [data-bd-btn]{padding:7px 12px;border-radius:8px;font-size:12px;cursor:pointer;font-family:inherit;
   border:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,.16));
   background:var(--dsw-alias-bg-overlay,rgba(128,128,128,.14));color:inherit;}
@@ -149,6 +151,7 @@ window.__ModuleLoader__.load({
       //    ⇒ 直接绑 cfg 的话，用户打字打到一半就被冲没了 ✗（2026-10-14 陌生人验收时抓到）
       const [perDay, setPerDay] = React.useState(null)
       const [gapHours, setGapHours] = React.useState(null)
+      const [gapMin, setGapMin] = React.useState(null)          // 两轮间隔（分钟，0.7.1 起）
       const [perScan, setPerScan] = React.useState(null)
       const [dmUid, setDmUid] = React.useState(null)        // 私信收件人 UID（本地草稿）
       const [dmMode, setDmMode] = React.useState(null)      // 投递方式：off / only / both
@@ -190,6 +193,7 @@ window.__ModuleLoader__.load({
         if (cfg && rl === null) setRl(cfg.reportLevel || 'full')
         if (cfg && perDay === null) setPerDay(String(cfg.perDay ?? 5))
         if (cfg && gapHours === null) setGapHours(String(cfg.gapHours ?? 3))
+        if (cfg && gapMin === null) setGapMin(String(st?.gapMin ?? cfg.gapMin ?? 180))
         if (cfg && perScan === null) setPerScan(String(cfg.perScan ?? 1))
         if (cfg && mention === null) setMention(cfg.mentionName || '')
         if (cfg && dmUid === null) setDmUid(cfg.dmUid ? String(cfg.dmUid) : '')
@@ -502,30 +506,44 @@ window.__ModuleLoader__.load({
         /* ── 定时 ── */
         h('div', { 'data-bd-sec': '', 'data-bd-in': 'daily' },
           h('div', { 'data-bd-h': '' }, '什么时候自己跑'),
-          h(ToggleRow, {
-            label: '峰谷时段自动刷',
-            note: '只在谷时跑 —— 工作日 12:00–14:00 与 18:00 之后（整个周末也算谷时）；关了就只能手动跑',
-            on: sw('peakValley'),
-            onChange: (v) => patch({ peakValley: v }, '峰谷时段自动刷'),
-          }),
-          sw('peakValley') ? h('div', { 'data-bd-sub': '' },
-            ...['noon', 'night'].map((k) => h(ToggleRow, {
-              key: k,
-              label: win[k].label,
-              note: `${win[k].start} – ${win[k].end}`,
-              on: sw(k),
-              onChange: (v) => patch({ [k]: v }, win[k].label),
-            })),
-            h('div', { 'data-bd-row': '' },
-              h('div', { 'data-bd-grow': '' },
-                h('div', { 'data-bd-label': '' }, '两轮之间至少隔几小时'),
-                h('div', { 'data-bd-note': '' }, '谷时窗口里按这个节奏一轮一轮来，跑到「每天最多自动刷几轮」用完为止；手动跑不受限制')),
-              h('input', {
-                'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 1, max: 12,
-                value: gapHours ?? '',
-                onChange: (e) => setGapHours(e.target.value),
-                onBlur: () => { const n = Math.max(1, Math.min(Number(gapHours) || 3, 12)); setGapHours(String(n)); patch({ gapHours: n }, '轮间隔') },
-              }))) : null),
+          (() => {
+            const 模式 = String(cfg.autoMode || (cfg.peakValley ? 'valley' : 'manual'))
+            const 备注 = 模式 === 'always'
+              ? '全天都跑 —— 高峰时段也在跑，可能更慢、更花；下面的「每天最多几轮」和「两轮之间至少隔」照样管用'
+              : (模式 === 'valley'
+                ? '只在谷时跑 —— 工作日 12:00–14:00 与 18:00 之后；整个周末整天都算谷时'
+                : '只手动 —— 不自己跑，你点「现在跑一轮」才动')
+            return h('div', {},
+              h('div', { 'data-bd-row': '' },
+                h('div', { 'data-bd-grow': '' },
+                  h('div', { 'data-bd-label': '' }, '自动刷时段'),
+                  h('div', { 'data-bd-note': '' }, 备注)),
+                h('select', {
+                  'data-bd-input': '', value: 模式,
+                  onChange: (e) => patch({ autoMode: e.target.value, peakValley: e.target.value !== 'manual' }, '自动刷时段'),
+                },
+                  h('option', { value: 'manual' }, '只手动'),
+                  h('option', { value: 'valley' }, '只在谷时'),
+                  h('option', { value: 'always' }, '全天都跑'))),
+              模式 === 'valley' ? h('div', { 'data-bd-sub': '' },
+                ...['noon', 'night'].map((k) => h(ToggleRow, {
+                  key: k,
+                  label: win[k].label,
+                  note: `${win[k].start} – ${win[k].end}`,
+                  on: sw(k),
+                  onChange: (v) => patch({ [k]: v }, win[k].label),
+                }))) : null,
+              模式 !== 'manual' ? h('div', { 'data-bd-row': '' },
+                h('div', { 'data-bd-grow': '' },
+                  h('div', { 'data-bd-label': '' }, '两轮之间至少隔几分钟'),
+                  h('div', { 'data-bd-note': '' }, '按这个节奏一轮一轮来，跑到「每天最多自动刷几轮」用完为止（最少 5 分钟，最多 720 = 12 小时）；手动跑不受这个限制')),
+                h('input', {
+                  'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 5, max: 720,
+                  value: gapMin ?? '',
+                  onChange: (e) => setGapMin(e.target.value),
+                  onBlur: () => { const n = Math.max(5, Math.min(Number(gapMin) || 180, 720)); setGapMin(String(n)); patch({ gapMin: n }, '轮间隔') },
+                })) : null)
+          })()),
 
         /* ── 派子代理刷的模型 ── */
         h('div', { 'data-bd-sec': '', 'data-bd-in': 'adv' },

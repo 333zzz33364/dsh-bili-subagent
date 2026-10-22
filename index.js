@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { McpClient } from './lib/mcp.mjs'
 import { verifyRecent, appendVerifyToReport } from './lib/verify.mjs'
-import { WINDOWS, stateDirOf, readJson, writeJson, ensureHomeFiles, inWindow, dayKey } from './lib/state.mjs'
+import { WINDOWS, stateDirOf, readJson, writeJson, ensureHomeFiles, inWindow, inValley, dayKey } from './lib/state.mjs'
 import { loginStart, loginPoll, saveCredential, renderQrPng } from './lib/login.mjs'
 import { ensureUv } from './lib/uvfetch.mjs'
 import { createSelfUpdate } from './lib/selfupdate.mjs'
@@ -77,9 +77,13 @@ const HINT_TMPL = [
 export const Config = !z ? undefined : z.object({
   /** 定量刷：每天最多挑几条 */
   perDay: z.natural().default(5).extra('volatile', true),
-  /** ⭐ 两轮自动刷之间至少隔几小时（谷时窗口里按这个节奏轮转，直到额度用完） */
+  /** ⭐ 两轮自动刷之间至少隔几小时（**老字段，0.7.1 起由 gapMin 取代**，读到会换算成分钟） */
   gapHours: z.natural().default(3).extra('volatile', true),
-  /** 峰谷自动刷（总开关） */
+  /** ⭐ 两轮自动刷之间至少隔几分钟（5–720）。想跑得密就调小（周末狂刷） */
+  gapMin: z.natural().default(180).extra('volatile', true),
+  /** 自动刷时段：manual = 只手动 / valley = 只在谷时 / always = 全天都跑 */
+  autoMode: z.string().default('manual').extra('volatile', true),
+  /** 峰谷自动刷（**老开关，还认**：开着 = valley，关着 = manual；新的看 autoMode） */
   peakValley: z.boolean().default(false).extra('volatile', true),
   /** 峰谷子开关：中午 / 晚上 */
   noon: z.boolean().default(true).extra('volatile', true),
@@ -213,7 +217,7 @@ export function apply(ctx, config) {
    *     ② **定时器回调里绝不让异常外冒**（见 tick）—— 未捕获异常会杀掉整个宿主进程。
    */
   const DEFAULTS = {
-    perDay: 5, gapHours: 3, peakValley: false, noon: true, night: true, autoComment: false,
+    perDay: 5, gapHours: 3, gapMin: 180, autoMode: 'manual', peakValley: false, noon: true, night: true, autoComment: false,
     dmMode: 'off', dmUid: 0,
     keywords: [], commentPerRound: 1, mentionName: '', pythonPath: 'python', reportLevel: 'full',
     subProvider: 'apii', subModel: 'deepseek-v4-pro',
@@ -268,6 +272,8 @@ export function apply(ctx, config) {
     const p = { ...patch }
     if ('perDay' in p) p.perDay = Math.max(0, Math.min(Number(p.perDay) || 0, 50))
     if ('gapHours' in p) p.gapHours = Math.max(1, Math.min(Number(p.gapHours) || 3, 12))
+    if ('gapMin' in p) p.gapMin = Math.max(5, Math.min(Number(p.gapMin) || 180, 720))
+    if ('autoMode' in p) p.autoMode = ['manual', 'valley', 'always'].includes(String(p.autoMode)) ? String(p.autoMode) : 'manual'
     if ('reportLevel' in p) p.reportLevel = ['full', 'brief', 'off'].includes(String(p.reportLevel)) ? String(p.reportLevel) : 'full'
     if ('commentPerRound' in p) p.commentPerRound = Math.max(0, Math.min(Number(p.commentPerRound) || 0, 20))
     if ('minViews' in p) p.minViews = Math.max(0, Math.min(Number(p.minViews) || 0, 100000000))
@@ -305,11 +311,31 @@ export function apply(ctx, config) {
     settingsRow = { at: t, row }
     return row
   }
+  /**
+   * ⭐ 0.7.1 迁移：老的「峰谷自动刷」开关 → 新的三档；老的小时制间隔 → 分钟制。
+   *    只在用户**没显式设过新字段**时才换算 —— 老配置不用重设，也不会盖掉新手动设的值。
+   */
+  const 迁移老配置 = (out, user) => {
+    let raw = {}
+    try { raw = readJson(cfgFile, {}) || {} } catch { raw = {} }
+    const u = user || {}
+    const 设过 = (k) => raw[k] !== undefined || u[k] !== undefined
+    if (!设过('autoMode')) {
+      const 开 = u.peakValley !== undefined ? u.peakValley
+        : (raw.peakValley !== undefined ? raw.peakValley : (out.peakValley ? true : undefined))
+      if (开 !== undefined) out.autoMode = 开 ? 'valley' : 'manual'
+    }
+    if (!设过('gapMin')) {
+      const 小 = u.gapHours !== undefined ? u.gapHours : raw.gapHours
+      if (小 !== undefined && Number(小) > 0) out.gapMin = Math.max(5, Math.min(Math.round(Number(小) * 60), 720))
+    }
+    return out
+  }
   const loadCfg = () => {
     const saved = savedCfg()
     const row = settingsDesc()
     // ⭐ 读回来统一过一遍范围：原生设置页那边我们是钳不到写的（见 clampPatch 的注释）
-    if (!row) return clampPatch(saved)
+    if (!row) return clampPatch(迁移老配置(saved, {}))
     const user = row.user || {}
     // ⭐ 用 row.value（DSH 原生设置的「生效值」，标量可靠），别用 apply 的 config 参数（字段常是坏值/对象，一丢就回默认）
     const out = normalize(row.value, { ...DEFAULTS })
@@ -324,7 +350,7 @@ export function apply(ctx, config) {
     // ⭐ 这两段提示词：存着空串也补成默认文案 —— 设置页里要「看得见默认」
     if (!String(out.hintPrompt || '').trim()) out.hintPrompt = HINT_TMPL
     if (!String(out.triggerPrompt || '').trim()) out.triggerPrompt = TRIGGER_TMPL
-    return clampPatch(out)
+    return clampPatch(迁移老配置(out, user))
   }
   const cfg = loadCfg()
   // ⭐ 配置是"随时可能被设置页就地改掉"的东西 ⇒ 每个入口用之前重算一遍（cfg 这个对象要一直指向同一份）
@@ -847,8 +873,10 @@ export function apply(ctx, config) {
         windows: Object.fromEntries(Object.entries(WINDOWS).map(([k, w]) => [k, {
           label: w.label, start: w.start, end: w.end,
           switchOn: Boolean(cfg[k]),
-          opening: inWindow(now, w),
+          opening: inValley(now, w),
         }])),
+        autoMode: 自动模式(),
+        gapMin: Math.max(5, Number(cfg.gapMin) || 180),
         peakValley: cfg.peakValley,
         autoComment: cfg.autoComment,
         dmMode: cfg.dmMode,
@@ -1329,27 +1357,41 @@ export function apply(ctx, config) {
     }
   }
 
+  // ⭐ 自动刷时段：三档（0.7.1 起）—— manual 只手动 / valley 只在谷时 / always 全天都跑
+  //    老开关 peakValley 还认（开 = valley，关 = manual），见 迁移老配置
+  const 自动模式 = () => {
+    const m = String(cfg.autoMode || '')
+    if (m === 'manual' || m === 'valley' || m === 'always') return m
+    return cfg.peakValley ? 'valley' : 'manual'
+  }
+
   // ⭐ 谷时定时器：每 60 秒看一次，满足四件事才跑
-  //    ① 总开关开着 ② 今天自动刷的轮数没到上限 ③ 现在落在某个谷时窗口里
-  //    ④ 离上一轮已经隔够「两轮之间至少隔几小时」
+  //    ① 自动刷不是「只手动」 ② 今天自动刷的轮数没到上限 ③ 现在落在某个谷时窗口里（全天模式不看这条）
+  //    ④ 离上一轮已经隔够「两轮之间至少隔几分钟」
   //    ★ 2026-10-19 改：原来「每个窗口每天只跑一次」（windows[key] 打勾）⇒ 一天最多 3 轮，
   //      perDay 填 5 永远用不满。现在改成**窗口内按间隔轮转**，直到额度用完。
+  //    ★ 2026-10-22 改：判时段不看星期的问题修了（周末整天算谷时，用 inValley）；
+  //      间隔从「小时」改成「分钟」，想跑密的人能调到 5 分钟一轮。
   const tick = () => {
     try {
       refreshCfg()                    // ⭐ 定时器活得比设置页久：每一跳都重新读一遍配置
-      if (!cfg.peakValley) return
+      const 模式 = 自动模式()
+      if (模式 === 'manual') return
       const now = new Date()
       const st = readJson(dutyStateFile, {})
       const today = dayKey(now)
       const used = countPickedToday(now)
       if (used >= Number(cfg.perDay || 0)) return
       // ⭐ 两轮之间至少隔这么久（手动跑不受这个限制）
-      const gapMs = Math.max(1, Number(cfg.gapHours || 3)) * 3600_000
+      const gapMs = Math.max(5, Number(cfg.gapMin) || 180) * 60_000
       const lastAt = Date.parse(String(st.lastRunAt || '')) || 0
       if (lastAt && now.getTime() - lastAt < gapMs) return
-      for (const k of ['noon', 'night']) {
-        if (!cfg[k]) continue
-        if (!inWindow(now, WINDOWS[k])) continue
+      // 全天模式 = 一个「永远开着」的窗口；谷时模式 = 勾了的那几个窗口
+      const 候选 = 模式 === 'always'
+        ? [{ k: 'always', w: null }]
+        : ['noon', 'night'].filter((k) => cfg[k]).map((k) => ({ k, w: WINDOWS[k] }))
+      for (const { k, w } of 候选) {
+        if (w && !inValley(now, w)) continue
         const key = `${today}:${k}`
         const rounds = used + 1
         const before = { windows: st.windows || {}, count: st.count || 0, picked: st.picked || 0, lastRunAt: st.lastRunAt || null, lastWhy: st.lastWhy || null }
@@ -1881,5 +1923,5 @@ export function apply(ctx, config) {
   } catch (e) { log(`HTTP 路由没挂上：${e?.message ?? e}`) }
 
   ctx.effect(() => () => { try { mcp?.stop() } catch { /* 收摊 */ } }, 'bili-duty: 收 MCP 子进程')
-  log(`已挂载（家=${stateDir}，python=${cfg.pythonPath}，峰谷=${cfg.peakValley ? '开' : '关'}）`)
+  log(`已挂载（家=${stateDir}，python=${cfg.pythonPath}，自动刷=${自动模式()}，间隔=${Math.max(5, Number(cfg.gapMin) || 180)} 分钟）`)
 }
