@@ -1018,6 +1018,14 @@ export function apply(ctx, config) {
     return ''
   }
 
+  /* ⭐ 2026-10-23：会话 id 有两种写法（`xxx` / `session-xxx`）。
+   *    只按字面比较会出「明明选的是这间，却说它没醒着」这种怪事（speak-up 用户报过同一个坑），
+   *    所以比较一律先去掉前缀。 */
+  const 会话键 = (v) => {
+    const s = String(v == null ? '' : v).trim()
+    return s.startsWith('session-') ? s.slice('session-'.length) : s
+  }
+
   // ⭐ 自动刷：到点不 headless，而是往「伙伴住的会话」followup 一句，让 TA 自己开一轮去刷（占每天额度）
   //   目标会话：设置里选的优先；没选就自动挑「最近聊过、非空、非归档」的那个 —— 不写死任何人的 id
   const listDirs = (p) => {
@@ -1328,7 +1336,7 @@ export function apply(ctx, config) {
     if (!agent) {
       try { agent = ctx.agents?.get?.(target) } catch {}
     }
-    if (!agent) agent = (ctx.agents?.list?.() || []).find((a) => sessionIdOf(a.session) === target)
+    if (!agent) agent = (ctx.agents?.list?.() || []).find((a) => 会话键(sessionIdOf(a.session)) === 会话键(target))
     if (!agent) { log('自动刷：目标会话现在没醒着（' + target.slice(0, 20) + '…）—— 先去那儿说句话再等下一轮'); return false }
     if (typeof agent.followup !== 'function') { log('自动刷：agent 没有 followup'); return false }
     const msg = {
