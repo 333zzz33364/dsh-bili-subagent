@@ -642,7 +642,7 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
               onChange: (e) => setInboxUids(e.target.value),
               onBlur: () => patch({ inboxUids: String(inboxUids || '').trim() }, '还要理谁'),
             }),
-            h('div', { 'data-bd-note': '' }, '逗号分隔的 UID。**留空 = 谁都理**（谁 @ 你、谁回你都告诉你）；填了 = 只理这些人。')),
+            h('div', { 'data-bd-note': '' }, '逗号分隔的 UID。留空 = 谁都理（谁 @ 你、谁回你都告诉你）；填了 = 只理这些人。')),
           h(ToggleRow, {
             label: '同一条只提醒一次',
             note: '开着 = 每条 @ / 回复最多提一次（等于别人最多回 1 条）；关掉 = 没回就再提，直到用完下面的次数',
@@ -674,7 +674,7 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
                 patch({ inboxPerDay: n }, '一天最多回别人几条')
               },
             }),
-            h('div', { 'data-bd-note': '' }, '「别人」的 @ 和回复一天最多递几条给它；到了上限就不再递（明天重新算）。**你自己 @ 它不算额度**。填 0 = 别人的一律不递。')),
+            h('div', { 'data-bd-note': '' }, '「别人」的 @ 和回复一天最多递几条给它；到了上限就不再递（明天重新算）。你自己 @ 它不算额度。填 0 = 别人的一律不递。')),
           h('div', { 'data-bd-row': '' },
             h('button', { 'data-bd-btn': '', disabled: busy === 'inbox', onClick: onInbox },
               busy === 'inbox' ? '看…' : '现在就去看一眼'))),

@@ -1026,6 +1026,11 @@ export function apply(ctx, config) {
     return s.startsWith('session-') ? s.slice('session-'.length) : s
   }
 
+  /* ⭐ 2026-10-23（反馈）：原来只认 `session-` 开头的目录名，
+   *    于是别的插件自己建的会话（`bili-whale`、IM 桥的 `im-…`）在下拉里根本选不到。
+   *    真正该排掉的只有「裸 UUID」那些（子代理 / 会话内容的中间目录）。 */
+  const 是会话目录 = (sid) => !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(String(sid || ''))
+
   // ⭐ 自动刷：到点不 headless，而是往「伙伴住的会话」followup 一句，让 TA 自己开一轮去刷（占每天额度）
   //   目标会话：设置里选的优先；没选就自动挑「最近聊过、非空、非归档」的那个 —— 不写死任何人的 id
   const listDirs = (p) => {
@@ -1044,7 +1049,7 @@ export function apply(ctx, config) {
       let best = null
       for (const ws of listDirs(sessRoot)) {
         for (const sid of listDirs(join(sessRoot, ws))) {
-          if (!sid.startsWith('session-')) continue
+          if (!是会话目录(sid)) continue
           if (archived.has(sid)) continue
           if (!existsSync(join(sessRoot, ws, sid, 'session.v4.jsonl.zstd'))) continue
           let at = 0
@@ -1820,7 +1825,7 @@ export function apply(ctx, config) {
         const rows = []
         for (const ws of dirs(sessRoot)) {
           for (const sid of dirs(join(sessRoot, ws))) {
-            if (!sid.startsWith('session-')) continue                       // 子代理（纯 UUID）不要
+            if (!是会话目录(sid)) continue                       // 子代理（纯 UUID）不要
             if (!existsSync(join(sessRoot, ws, sid, 'session.v4.jsonl.zstd'))) continue   // 没有日志 = 不算真会话
             if (archived.has(sid)) continue                                 // 跳过归档
             let title = ''
