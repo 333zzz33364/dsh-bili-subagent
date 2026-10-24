@@ -1276,10 +1276,17 @@ export function apply(ctx, config) {
       let 陌生人 = 0
       for (const uid of [...new Set(名单)]) {
         try {
-          const raw = await call('bili_dm_recent', { size: 20, talker_id: uid })
+          // ⚠️ 2026-10-24 修：以前只看最近 20 条 —— 自己回得多的时候，最近 20 条**全是自己发的**，
+          //    对方那条转发被挤出窗口 ⇒ 收件箱永远是空的（她点「看一眼」看着就是「没用」）。
+          //    现在往前翻 3 页；并且**自己发的**不算「陌生人」（那是噪音，不是别人乱发）。
+          const raw = await call('bili_dm_recent', { size: 30, talker_id: uid, pages: 3 })
           const j = typeof raw === 'string' ? JSON.parse(raw) : raw
+          const 我自己 = Number((j && j.me) || 0)
           for (const m of (j && j.items) || []) {
-            if (Number(m.from_uid) !== uid) { 陌生人++; continue }   // 别人发的一律不理
+            if (Number(m.from_uid) !== uid) {
+              if (Number(m.from_uid) !== 我自己) 陌生人++     // 别人发的一律不理
+              continue
+            }
             const bv = String(m.bv || '')
             if (!bv) continue                                       // 没视频的私信先不管
             items.push({
@@ -2091,10 +2098,28 @@ export function apply(ctx, config) {
       refreshCfg()
       // ⭐ 跟「自动刷」完全同一条路：往选定会话里发一句话，让伙伴自己去派子代理
       //    （不再拿"当前第一个 agent"当父会话 —— 那样子代理会跑到别的会话里去）
-      const started = await triggerFeiyuScan('manual')
-      log('「现在跑一轮」：' + (started ? '已投递到会话' : '没投递成功'))
+      // ⚠️ 2026-10-24 修（她报的）：手动跑这一轮**以前不看收件箱** ——
+      //    你私信转给它的视频、别人回你的评论，都得等定时那一轮才带上，
+      //    所以「现在跑一轮」永远不回复私信。现在跟定时跑一样先拉一遍。
+      let extra = ''
+      let box = []
+      try {
+        box = await pickInbox()
+        if (box.length) {
+          extra = renderInbox(box)
+          log('收件箱（手动那一轮）：递过去 ' + box.length + ' 条')
+        }
+      } catch (e) { log('收件箱：手动那一轮拉取失败 ' + (e?.message ?? e)) }
+      const started = await triggerFeiyuScan('manual', extra, box)
+      if (started && box.length) commitInbox(box)
+      log('「现在跑一轮」：' + (started ? '已投递到会话' : '没投递成功') + (box.length ? '（带 ' + box.length + ' 条 @/回复/私信）' : ''))
       return sendJson(res, 200, started
-        ? { ok: true, started: true, hint: '已经在选定的会话里叫它去刷了 —— 切过去看它的回复' }
+        ? {
+          ok: true, started: true, inbox: box.length,
+          hint: box.length
+            ? '已经在选定的会话里叫它去刷了，顺带把 ' + box.length + ' 条 @/回复/私信一起递过去了'
+            : '已经在选定的会话里叫它去刷了 —— 切过去看它的回复',
+        }
         : { ok: false, error: '没投递成功：先在设置里选一个会话，或确保那个会话醒着（去说句话）' })
     }
 

@@ -1509,12 +1509,15 @@ def _dm_get(url: str):
 
 
 @tool()
-async def bili_dm_recent(size: int = 20, talker_id: int = 0) -> str:
+async def bili_dm_recent(size: int = 20, talker_id: int = 0, pages: int = 1) -> str:
     """读最近收到的私信（**不做身份过滤**，谁发的都原样返回，由宿主按名单筛）。
 
     Args:
-        size: 读多少条（1~30，默认 20）
+        size: 每页读多少条（1~30，默认 20）
         talker_id: 读哪个会话（0 = 发给自己那条）。⚠️ 别人转发给你的，要填**对方的 uid**
+        pages: 往前翻几页（1~5，默认 1）。
+            ⚠️ 为什么需要它：**你自己回得多**，最近 20 条可能全是你自己发的，
+               对方那条转发就被挤出窗口了 —— 宿主看到的永远是空的。
 
     Returns:
         JSON：{ok, me, talker, count, items:[{key, ts, from_uid, bv, text, is_card}]}
@@ -1538,13 +1541,37 @@ async def bili_dm_recent(size: int = 20, talker_id: int = 0) -> str:
                     break
         except Exception:
             pass
-    url = ("https://api.vc.bilibili.com/svr_sync/v1/svr_sync/fetch_session_msgs"
-           "?talker_id=" + str(talker) + "&session_type=1&size=" + str(n) + "&build=0&mobi_app=web")
-    d = _dm_get(url)
-    msgs = ((d.get("data") or {}).get("messages") or [])
+    base = ("https://api.vc.bilibili.com/svr_sync/v1/svr_sync/fetch_session_msgs"
+            "?talker_id=" + str(talker) + "&session_type=1&size=" + str(n) + "&build=0&mobi_app=web")
     import re as _re
+    页数 = max(1, min(5, int(pages or 1)))
+    raw = []
+    end_seqno = None
+    for _ in range(页数):
+        url = base + (("&end_seqno=" + str(end_seqno)) if end_seqno else "")
+        d = _dm_get(url)
+        batch = ((d.get("data") or {}).get("messages") or [])
+        if not batch:
+            break
+        raw.extend(batch)
+        try:
+            end_seqno = min(int(m.get("msg_seqno") or 0) for m in batch)
+        except Exception:
+            break
+        if not end_seqno:
+            break
+    # 去重 + 按时间从旧到新（翻页会带回重复的边界消息）
+    seen_key = set()
+    msgs = []
+    for m in raw:
+        k = str(m.get("msg_key") or m.get("msg_seqno") or m.get("timestamp"))
+        if k in seen_key:
+            continue
+        seen_key.add(k)
+        msgs.append(m)
+    msgs.sort(key=lambda x: int(x.get("timestamp") or 0))
     out = []
-    for m in reversed(msgs):
+    for m in msgs:
         mt = int(m.get("msg_type") or 1)
         try:
             c = json.loads(m.get("content") or "{}")

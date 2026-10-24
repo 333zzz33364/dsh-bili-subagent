@@ -439,13 +439,18 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
       }
 
       // 手动看一眼 @ 和回复
+      // ⚠️ 2026-10-24 修（她报的「点了没反应」）：以前结果只写进页面最底下那行 msg，
+      //    她点完看不到任何变化，看着就是「这个按钮没用了」。现在用 say()，顶部也显示一份。
       const onInbox = async () => {
         setBusy('inbox')
+        say('去看一眼 @ 和回复…', '')
         try {
           const r = await jpost('/inbox', {})
-          setMsg((r && (r.hint || ('拿到 ' + (r.count || 0) + ' 条'))) || '看完了')
+          const n = Number((r && r.count) || 0)
+          if (r && r.ok === false) say('看一眼失败：' + (r.error || '不知道为啥'), 'warn')
+          else say(r.hint || (n ? '拿到 ' + n + ' 条' : '这会儿没有新的 @ / 回复'), n ? 'good' : '')
         } catch (e) {
-          setMsg('看一眼失败：' + (e && e.message))
+          say('看一眼失败：' + (e && e.message), 'warn')
         }
         setBusy('')
       }
