@@ -1115,11 +1115,43 @@ export function apply(ctx, config) {
   }
 
   // ⭐ 最后兜底：一个可用会话都没有时，新建一个（用完就收，别一直占着）
+  //
+  // ⚠⚠ 2026-10-24 修（用户报错）：
+  //   `本轮运行失败  agent "session-…" has no provider/model: set AgentOptions.provider and
+  //    AgentOptions.model or supply both via the agent/request waterfall`
+  //   真因：这里新建 agent 时**没给模型**。宿主不会替它猜，于是一开跑就失败。
+  //   只有「设置里没选目标会话、又没任何聊过的会话」时才会走到这条路，所以大部分人碰不到。
+  //   → 现在按三级取模型：① 设置里的子代理模型 ② 当前/最近会话正在用的模型 ③ 都没有就**不建**，
+  //     并写清楚该去哪儿设，别丢给用户一句看不懂的英文。
+  const 取兜底模型 = () => {
+    const p = String(cfg.subProvider || '').trim()
+    const m = String(cfg.subModel || '').trim()
+    if (p && m) return { provider: p, model: m }
+    try {
+      const 参照 =
+        (typeof ctx.agents?.currentInitiator === 'function' ? ctx.agents.currentInitiator() : null) ||
+        ((typeof ctx.agents?.list === 'function' ? ctx.agents.list() : []) || [])[0]
+      const c = 参照?.session?.requestHeader?.()?.config
+      if (c && c.provider && c.model) return { provider: c.provider, model: c.model }
+    } catch { /* 拿不到就算了 */ }
+    return null
+  }
+
   const createScanSession = async () => {
     if (typeof ctx.agents?.create !== 'function') return { id: '', agent: null }
     try {
+      const 模型 = 取兜底模型()
+      if (!模型) {
+        log('自动刷：没有可用会话，想临时建一个，但**不知道该用哪个模型**（设置里的子代理模型是空的，也没有活着的会话可参照）')
+        log('   → 去设置 → 刷B站：「自动刷在哪个会话」挑一个，或者在「派子代理刷的模型」里选一个')
+        return { id: '', agent: null }
+      }
       const sid = 'session-' + randomUUID()
-      const handle = await ctx.agents.create({ sessionId: sid, meta: { cwd: stateDir } })
+      const handle = await ctx.agents.create({
+        sessionId: sid,
+        meta: { cwd: stateDir },
+        agentOptions: { provider: 模型.provider, model: 模型.model },
+      })
       const agent = handle?.agent || null
       let done = false
       const dispose = () => {
