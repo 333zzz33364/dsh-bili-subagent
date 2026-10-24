@@ -1287,12 +1287,16 @@ export function apply(ctx, config) {
               if (Number(m.from_uid) !== 我自己) 陌生人++     // 别人发的一律不理
               continue
             }
+            // ⚠️ 2026-10-24 修（她报的）：以前 `if (!bv) continue` —— **只认带视频的私信**，
+            //    她单纯给 B站 那边发一句话（没有视频）就被静默丢掉，那边当然永远不回。
+            //    现在纯文字私信也递；没视频就是「只说了一句话」，回法自然也不同（见 renderInbox / 触发语）。
             const bv = String(m.bv || '')
-            if (!bv) continue                                       // 没视频的私信先不管
+            const 话 = String(m.text || '').trim()
+            if (!bv && !话) continue
             items.push({
-              kind: 'dm', id: String(m.key || bv), mid: uid,
+              kind: 'dm', id: String(m.key || bv || m.ts), mid: uid,
               nickname: '你私信转发的', bvid: bv,
-              content: String(m.text || '').slice(0, 120),
+              content: 话.slice(0, 120),
               rpid: 0, root: 0, at: Number(m.ts) || 0,
             })
           }
@@ -1443,6 +1447,10 @@ export function apply(ctx, config) {
       if (是私信) {
         const 话0 = String(it.content || '').replace(/\s+/g, ' ').slice(0, 120)
         // 私信那条只说「你把这条转给我了」—— 不套「在…下面 …了你」，也不显示 rpid（私信没有）
+        if (!it.bvid) {
+          // ⭐ 纯文字私信（没带视频）：就一句话，照样要回，而且不用去评论区
+          return '· ' + ownerName + ' 私信跟你说了一句：「' + 话0 + '」'
+        }
         return '· 你私信转给我一条视频：「' + 话0 + '」' + String.fromCharCode(10) + '  ' + it.bvid
       }
       const 哪 = it.title ? '《' + it.title + '》下面' : '一个视频下面'
@@ -1463,7 +1471,10 @@ export function apply(ctx, config) {
     const 别人 = items.filter((it) => it.kind !== 'dm' && Number(it.mid || 0) !== 自己)
     const 段 = []
     if (私信们.length) {
-      段.push('〔' + ownerName + ' 私信转给你 ' + 私信们.length + ' 条视频 —— 看完**私信回**〕'
+      const 有视频 = 私信们.some((it) => it.bvid)
+      段.push((有视频
+        ? '〔' + ownerName + ' 私信转给你 ' + 私信们.length + ' 条视频 —— 看完**私信回**〕'
+        : '〔' + ownerName + ' 在 B站 私信里跟你说话 —— **私信回**〕')
         + String.fromCharCode(10) + 私信们.map(行).join(String.fromCharCode(10))
         + String.fromCharCode(10) + '  ↳ 回法：用 `bili_send_message` 私信回她，**不发评论、不 @**；'
         + '话里**不用带 BV 号**（她转给你的，她知道是哪条）。')
@@ -1518,9 +1529,14 @@ export function apply(ctx, config) {
         // ⭐ 2026-10-22「门对门」：这一轮如果只有私信，就别叫她去刷一整轮、也别叫她去评论 ——
         //    原来的触发语里有「该发评论发评论」，对私信那条是错的。
         const 全私信 = Array.isArray(box) && box.length > 0 && box.every((it) => it && it.kind === 'dm')
+        const 有视频 = Array.isArray(box) && box.some((it) => it && it.kind === 'dm' && it.bvid)
         const 例外 = 全私信
-          ? '⚠️ 这一轮只有' + ownerN + '私信转来的一条视频：**只看那一条**（`bili_scan` 传 bvid），别刷整轮；'
-            + '看完**私信回她**，不要发评论、不要 @、也不要去评论区。' + String.fromCharCode(10) + String.fromCharCode(10)
+          ? (有视频
+            ? '⚠️ 这一轮只有' + ownerN + '私信转来的一条视频：**只看那一条**（`bili_scan` 传 bvid），别刷整轮；'
+              + '看完**私信回她**，不要发评论、不要 @、也不要去评论区。' + String.fromCharCode(10) + String.fromCharCode(10)
+            : '⚠️ 这一轮只是' + ownerN + '在 **B站 私信**里跟你说了一句话（没带视频）：'
+              + '**不用刷、不用看视频、也不用去评论区**；看完**用 `bili_send_message` 私信回**她，'
+              + '话里不用带 BV 号。' + String.fromCharCode(10) + String.fromCharCode(10))
           : ''
         // ⭐ 有 @ / 回复就一起递过去：一条消息里说完，别连着弹两下
         return 例外 + (extra ? base + String.fromCharCode(10) + String.fromCharCode(10) + extra : base)
