@@ -176,6 +176,7 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
       const [inboxUids, setInboxUids] = React.useState(null)        // 还要理谁（本地草稿）
       const [inboxMaxRemind, setInboxMaxRemind] = React.useState(null)  // 没回提醒几次（本地草稿）
       const [inboxPerDay, setInboxPerDay] = React.useState(null)        // 一天最多回别人几条（本地草稿）
+      const [watchInterval, setWatchInterval] = React.useState(null)     // 随叫随到：隔几秒问一次（本地草稿）
       const [upBusy, setUpBusy] = React.useState(false)
       const [report, setReport] = React.useState(null)        // 非 null = 报告已展开   // 顶部那行状态（跑一轮/装依赖的反馈原来在最底下，看不见）
       const [loginState, setLoginState] = React.useState('')
@@ -206,6 +207,7 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
         if (cfg && inboxUids === null) setInboxUids(String(cfg.inboxUids || ''))
         if (cfg && inboxMaxRemind === null) setInboxMaxRemind(String(cfg.inboxMaxRemind ?? 2))
         if (cfg && inboxPerDay === null) setInboxPerDay(String(cfg.inboxPerDay ?? 5))
+        if (cfg && watchInterval === null) setWatchInterval(String(cfg.watchInterval ?? 120))
         if (cfg && scanPrompt === null) setScanPrompt(cfg.scanPrompt || '')
         if (cfg && watchPrompt === null) setWatchPrompt(cfg.watchPrompt || '')
         if (cfg && hintPrompt === null) setHintPrompt(cfg.hintPrompt || '')
@@ -680,6 +682,51 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
           h('div', { 'data-bd-row': '' },
             h('button', { 'data-bd-btn': '', disabled: busy === 'inbox', onClick: onInbox },
               busy === 'inbox' ? '看…' : '现在就去看一眼'))),
+
+        /* ── 有人找我就马上告诉你 ── */
+        h('div', { 'data-bd-sec': '', 'data-bd-in': 'social' },
+          h('div', { 'data-bd-h': '' }, '有人找我就马上告诉你'),
+          h('div', { 'data-bd-note': '' }, '平时要等到谷时刷一轮，才知道有没有人 @ 你、私信你。开了这个，它会隔一会儿去问一句，一有新消息就立刻递到伙伴手上 —— 不用等下一轮。'),
+          h(ToggleRow, {
+            label: '开着（默认关）',
+            note: '关着的时候一个请求都不发',
+            on: Boolean(cfg.watchOn),
+            onChange: (v) => patch({ watchOn: v }, '有人找我就马上告诉你'),
+          }),
+          h(ToggleRow, {
+            label: '私信',
+            note: '有人私信你，直接把内容和发信人递过去',
+            on: cfg.watchDm !== false,
+            onChange: (v) => patch({ watchDm: v }, '提醒私信'),
+          }),
+          h(ToggleRow, {
+            label: '@ 你和回你的评论',
+            note: '有人 @ 你、或者回了你的评论，把那条递过去',
+            on: cfg.watchAt !== false,
+            onChange: (v) => patch({ watchAt: v }, '提醒 @ 和回复'),
+          }),
+          h('div', { 'data-bd-sub': '' },
+            h('div', { 'data-bd-label': '' }, '隔多久问一次（秒）'),
+            h('input', {
+              'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 60, max: 1800,
+              value: watchInterval ?? '120',
+              onChange: (e) => setWatchInterval(e.target.value),
+              onBlur: () => {
+                const n = Math.max(60, Math.min(1800, Number(watchInterval) || 120))
+                setWatchInterval(String(n))
+                patch({ watchInterval: n }, '问一次的间隔')
+              },
+            }),
+            h('div', { 'data-bd-note': '' }, '问得太勤有被 B站 限流的风险，最短 60 秒；默认 120 秒。')),
+          h('div', { 'data-bd-sub': '' },
+            h('div', { 'data-bd-label': '' }, '什么时候问'),
+            h('select', {
+              'data-bd-input': '', value: String(cfg.watchScope || 'valley'),
+              onChange: (e) => patch({ watchScope: e.target.value }, '什么时候问'),
+            },
+              h('option', { value: 'valley' }, '只在谷时（默认）'),
+              h('option', { value: 'always' }, '全天')),
+            h('div', { 'data-bd-note': '' }, '高峰时段把伙伴叫醒比较贵；除非你真的要随时都在，否则留在「只在谷时」。'))),
 
         /* ── 提示词（可改） ── */
         h('div', { 'data-bd-sec': '', 'data-bd-in': 'taste' },

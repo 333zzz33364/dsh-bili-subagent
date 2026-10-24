@@ -178,6 +178,16 @@ export const Config = !z ? undefined : z.object({
   inboxMaxRemind: z.natural().default(2).extra('volatile', true),
   /** 一天最多回「别人」几条 */
   inboxPerDay: z.natural().default(5).extra('volatile', true),
+  /** ⭐ 随叫随到：有人找我就马上告诉你（**总开关，默认关**） */
+  watchOn: z.boolean().default(false).extra('volatile', true),
+  /** 随叫随到 —— 私信这一路 */
+  watchDm: z.boolean().default(true).extra('volatile', true),
+  /** 随叫随到 —— @ 和回复这一路 */
+  watchAt: z.boolean().default(true).extra('volatile', true),
+  /** 随叫随到：每隔几秒问一次（有效 60–1800，读时钳） */
+  watchInterval: z.natural().default(120).extra('volatile', true),
+  /** 随叫随到时段：valley = 只在谷时 / always = 全天 */
+  watchScope: z.string().default('valley').extra('volatile', true),
   /** 三连模式：off / like / coin / fav / like_fav / triple */
   tripleMode: z.string().default('off').extra('volatile', true),
   /** 投币枚数 1~2 */
@@ -198,6 +208,40 @@ const pyEnv = (extra = {}) => ({
   PYTHONIOENCODING: 'utf-8',
   ...extra,
 })
+
+/* ⭐ 随叫随到的几个纯函数（不碰 ctx / config，单独提出来是为了能自测） */
+/** 问一次的间隔：钳在 60–1800 秒，非法值回默认 120 */
+export function 钳提醒间隔(v) {
+  return Math.max(60, Math.min(1800, Number(v) || 120))
+}
+const 时刻 = (ts) => {
+  const d = new Date(Number(ts) || Date.now())
+  const p = (n) => String(n).padStart(2, '0')
+  return p(d.getHours()) + ':' + p(d.getMinutes())
+}
+const 剪短发 = (s, n = 200) => {
+  const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim()
+  return t.length > n ? t.slice(0, n) + '…' : t
+}
+/** 把「有人找你」的几条拼成一句话递给伙伴（她在会话里看到的就是这段） */
+export function 拼提醒文案(items) {
+  const 行 = (items || []).map((x) => {
+    if (x.种类) {
+      const 啥 = x.种类 === 'at' ? '有人 @ 你' : (x.种类 === 'reply' ? '有人回了你的评论' : '有人找你')
+      return '· ' + 啥 + '｜' + (x.谁 || '有人') + (x.bv ? '（' + x.bv + '）' : '') + '：'
+        + (x.内容 || '（没文字）') + (x.ts ? '　' + 时刻(x.ts) : '')
+    }
+    return '· 私信｜' + (x.谁 || '有人') + '：' + (x.内容 || '（没文字）')
+      + (x.bv ? '　视频 ' + x.bv : '') + (x.ts ? '　' + 时刻(x.ts) : '')
+  })
+  return [
+    '（B站 有人找你 —— 我刚看到的）',
+    '',
+    ...行,
+    '',
+    '要不要回、要不要看，你定；我只是先把话带到。',
+  ].join('\n')
+}
 
 export function apply(ctx, config) {
   const pluginDir = dirname(fileURLToPath(import.meta.url))
@@ -274,6 +318,13 @@ export function apply(ctx, config) {
     inboxOnceOnly: true,  // 同一条只提醒一次（= 别人最多回 1 条）
     inboxMaxRemind: 2,    // 没回的话最多提醒几次，之后不再提
     inboxPerDay: 5,       // ⭐ 一天最多回「别人」几条 —— 防刷，也防她一天耗太多
+    // ⭐ 随叫随到（2026-10-24）：有人 @ 你 / 私信你，不用等下一轮刷，隔一会儿就问一次
+    //    ⚠️ B站 没有推送接口，只能"定时去问一句"；默认关，谁要谁自己开
+    watchOn: false,
+    watchDm: true,        // 私信这一路
+    watchAt: true,        // @ 和回复这一路
+    watchInterval: 120,   // 每隔几秒问一次（有效 60–1800）
+    watchScope: 'valley', // valley = 只在谷时问 / always = 全天
     // ⭐ 三连（2026-10-22 她要的）：给「这一轮最值得的那条」做点动作
     //    off=不动 / like=只点赞 / coin=只投币 / fav=只收藏 / like_fav=点赞+收藏 / triple=一键三连
     //    ⚠ 默认 off：别人装了不该莫名给视频点赞、更不该花人家的硬币
@@ -319,6 +370,8 @@ export function apply(ctx, config) {
     if ('tripleMode' in p) p.tripleMode = ['off','like','coin','fav','like_fav','triple'].includes(String(p.tripleMode)) ? String(p.tripleMode) : 'off'
     if ('tripleCoin' in p) p.tripleCoin = Math.max(1, Math.min(Number(p.tripleCoin) || 1, 2))
     if ('notesOn' in p) p.notesOn = Boolean(p.notesOn)
+    if ('watchInterval' in p) p.watchInterval = Math.max(60, Math.min(Number(p.watchInterval) || 120, 1800))
+    if ('watchScope' in p) p.watchScope = ['valley', 'always'].includes(String(p.watchScope)) ? String(p.watchScope) : 'valley'
     return p
   }
 
@@ -986,7 +1039,9 @@ export function apply(ctx, config) {
     description: '读 / 改「刷B站」的设置。不给 `patch` 就是读；给了就改（只认 schema 里的字段）。\n'
       + '例：`{"perDay":5,"peakValley":true,"noon":true,"night":true,"autoComment":false,"perScan":1}`；'
       + '私信投递：`{"dmMode":"only","dmUid":12345678}`（dmMode = off / only / both）；'
-      + '看 @ 和回复：`{"inboxOn":true,"inboxOnceOnly":true,"inboxMaxRemind":2}`。',
+      + '看 @ 和回复：`{"inboxOn":true,"inboxOnceOnly":true,"inboxMaxRemind":2}`；'
+      + '有人找我就马上告诉你：`{"watchOn":true,"watchDm":true,"watchAt":true,"watchInterval":120,"watchScope":"valley"}`'
+      + '（watchScope = valley 只在谷时 / always 全天；watchInterval 60–1800 秒）。',
     parameters: { patch: { type: 'object', additionalProperties: true, description: '要改的字段（可省）' } },
     async execute(args) {
       let host = null
@@ -1188,7 +1243,8 @@ export function apply(ctx, config) {
 
   const 收件键 = (it) => String(it.kind || 'x') + ':' + String(it.rpid || it.id || '')
 
-  async function pullInbox() {
+  /** 只拉「@ / 回复」那两路（随叫随到也用这一份，别抄第二套） */
+  async function pullAtReplies() {
     const items = []
     const 拉一个 = async (toolName) => {
       try {
@@ -1202,6 +1258,11 @@ export function apply(ctx, config) {
     }
     await 拉一个('bili_received_at_and_likes')
     await 拉一个('bili_received_replies')
+    return items
+  }
+
+  async function pullInbox() {
+    const items = await pullAtReplies()
     // ⭐ 第三路：私信（2026-10-22）—— 她 @ 完还能直接把视频转发给「我」，
     //    只认名单里那几个人发的（默认就是「私信 UID」那个号＝她本人）；别人发的记一条日志、不理。
     //    ⚠️ 一次分享多条要**全抽**，不能只取最近一条。
@@ -1407,7 +1468,9 @@ export function apply(ctx, config) {
     return 段.join(String.fromCharCode(10) + String.fromCharCode(10))
   }
 
-    const triggerFeiyuScan = async (why, extra, box) => {
+  /** 找「伙伴住的那个会话」并拿到 agent —— 自动刷、随叫随到共用这一份。
+   *  找不到就返回 null，原因已经写进日志（不留一句看不懂的英文给使用者）。 */
+  const 取目标会话 = async (谁 = '自动刷') => {
     let target = String(cfg.targetSession || '').trim()
     if (!target) target = pickRecentSession()          // 没选 → 最近聊过的那个
     let agent = null
@@ -1416,13 +1479,20 @@ export function apply(ctx, config) {
       target = made.id
       agent = made.agent
     }
-    if (!target) { log('自动刷：找不到可用的目标会话（请在设置里选一个会话）'); return false }
+    if (!target) { log(谁 + '：找不到可用的目标会话（请在设置里选一个会话）'); return null }
     if (!agent) {
       try { agent = ctx.agents?.get?.(target) } catch {}
     }
     if (!agent) agent = (ctx.agents?.list?.() || []).find((a) => 会话键(sessionIdOf(a.session)) === 会话键(target))
-    if (!agent) { log('自动刷：目标会话现在没醒着（' + target.slice(0, 20) + '…）—— 先去那儿说句话再等下一轮'); return false }
-    if (typeof agent.followup !== 'function') { log('自动刷：agent 没有 followup'); return false }
+    if (!agent) { log(谁 + '：目标会话现在没醒着（' + target.slice(0, 20) + '…）—— 先去那儿说句话再等下一轮'); return null }
+    if (typeof agent.followup !== 'function') { log(谁 + '：agent 没有 followup'); return null }
+    return { target, agent }
+  }
+
+    const triggerFeiyuScan = async (why, extra, box) => {
+    const 递 = await 取目标会话('自动刷')
+    if (!递) return false
+    const { target, agent } = 递
     const msg = {
       id: randomUUID(),
       role: 'user',
@@ -1531,6 +1601,166 @@ export function apply(ctx, config) {
     timer.unref?.()                                    // 别因为这个定时器让进程不肯退出
     ctx.effect(() => () => clearInterval(timer), 'bili-duty: 谷时定时器')
   } catch (e) { log(`定时器没起来：${e?.message ?? e}`) }
+
+  // ── 随叫随到：有人找我就马上告诉你 ─────────────────────────────────
+  //  ⭐ 2026-10-24：刷一轮要等谷时，中间有人 @ 你、私信你，本来得等到下一轮才知道。
+  //     现在隔一会儿问一句，有新东西立刻递到伙伴手上 —— 不用等下一轮。
+  //  ⚠️ B站 没有推送接口（没有 webhook、没有回调地址），所谓「立马」只能是**定时去问**：
+  //     所以先问一个最小的「未读数」（一个请求、几百字节），数字变了才去读具体是谁说了什么。
+  //     不能每跳都把私信列表全拉一遍 —— 那既不省流量，也更容易被风控。
+  //  ⚠️ 这只是**通知**，不是代回：回不回、怎么回、要不要看视频，都是她自己的事。
+  const watchFile = join(stateDir, 'watch.json')
+  let watchBusy = false
+  let watchNextAt = 0
+
+  const 提醒间隔毫秒 = () => 钳提醒间隔(cfg.watchInterval) * 1000
+  const 现在是谷时 = (now) => inValley(now, WINDOWS.noon) || inWindow(now, WINDOWS.night)
+
+  /** 私信那一路：先看谁有未读，再只读那几个人的最近几条 */
+  async function 收私信(feed) {
+    const box = readJson(watchFile, { seen: {} })
+    if (!box.seen || typeof box.seen !== 'object') box.seen = {}
+    const raw = await call('bili_dm_sessions', { size: 10 }, { timeoutMs: 40_000 })
+    const j = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (!j || j.ok === false) { log('提醒：私信会话列表读不到 ' + (j?.error ?? '')); return }
+    const 有新 = (j.items || []).filter((x) => Number(x.unread) > 0).slice(0, 3)
+    for (const s of 有新) {
+      let msgs = []
+      try {
+        const r2 = await call('bili_dm_recent', { size: 10, talker_id: Number(s.talker_uid) }, { timeoutMs: 40_000 })
+        const j2 = typeof r2 === 'string' ? JSON.parse(r2) : r2
+        msgs = (j2 && j2.items) || []
+      } catch (e) {
+        log('提醒：读私信内容失败（' + (s.nick || s.talker_uid) + '）' + (e?.message ?? e))
+        continue
+      }
+      for (const m of msgs) {
+        if (Number(m.from_uid) !== Number(s.talker_uid)) continue     // 只理别人发过来的
+        const k = 'dm:' + String(m.key || m.ts)
+        if (box.seen[k]) continue
+        feed.push({
+          键: k,
+          谁: String(s.nick || '') || ('UID ' + s.talker_uid),
+          内容: 剪短发(m.text),
+          bv: String(m.bv || ''),
+          ts: Number(m.ts) || 0,
+        })
+      }
+    }
+  }
+
+  /** @ / 回复那一路：跟「每轮顺手看一眼」共用一份账（inbox.json），所以不会两边重复提 */
+  async function 收提醒(feed) {
+    const box = readJson(inboxFile, { seen: {} })
+    if (!box.seen || typeof box.seen !== 'object') box.seen = {}
+    for (const it of await pullAtReplies()) {
+      const k = 收件键(it)
+      const rec = box.seen[k]
+      if (rec && Number(rec.n || 0) >= 1) continue    // 提过就不再提（这条只报一次，不像"没回再提"）
+      feed.push({
+        键: '',
+        谁: String(it.nickname || '有人'),
+        内容: 剪短发(it.content),
+        bv: String(it.bvid || ''),
+        ts: Number(it.at) || 0,
+        种类: String(it.kind || ''),
+        原始: it,
+      })
+    }
+  }
+
+  async function watchOnce() {
+    const 要私信 = cfg.watchDm !== false
+    const 要提醒 = cfg.watchAt !== false
+    if (!要私信 && !要提醒) return
+    const now = new Date()
+    if (String(cfg.watchScope || 'valley') === 'valley' && !现在是谷时(now)) return
+
+    // ① 先问一句最小的：未读数（B站 一个请求就给全：私信 chat / @ at / 收到的回复 recv_reply）
+    let 数 = null
+    try {
+      const raw = await call('bili_unread_messages', {}, { timeoutMs: 30_000 })
+      数 = typeof raw === 'string' ? JSON.parse(raw) : raw
+    } catch (e) { log('提醒：未读数读不到 ' + (e?.message ?? e)); return }
+    if (!数 || 数.error) { log('提醒：未读数读不到 ' + (数?.error ?? '')); return }
+    const 有私信 = 要私信 && Number(数.chat || 0) > 0
+    const 有动静 = 要提醒 && (Number(数.at || 0) > 0 || Number(数.recv_reply || 0) > 0)
+    if (!有私信 && !有动静) return          // ⭐ 绝大多数时候走这条：什么都没发生，就一个数字
+
+    // ② 有新东西才去读具体内容
+    const 私信 = []
+    const 提醒 = []
+    if (有私信) {
+      try { await 收私信(私信) } catch (e) { log('提醒：私信那一路出错 ' + (e?.message ?? e)) }
+    }
+    if (有动静) {
+      try { await 收提醒(提醒) } catch (e) { log('提醒：@ 那一路出错 ' + (e?.message ?? e)) }
+    }
+    const 全 = [...私信, ...提醒].slice(0, 6)
+    if (!全.length) return
+
+    // ③ 递过去（一条消息说完，别连着弹好几下）
+    const 文案 = 拼提醒文案(全)
+
+    const 递 = await 取目标会话('提醒')
+    if (!递) return
+    try {
+      await 递.agent.followup({
+        id: randomUUID(),
+        role: 'user',
+        content: [{ type: 'text', text: 文案 }],
+        source: { kind: 'bili-watch' },
+      })
+    } catch (e) {
+      log('提醒：递不进去 ' + (e?.message ?? e))
+      return
+    }
+
+    // ④ 真递出去了才记账（没递成功下次还会提）
+    try {
+      if (私信.length) {
+        const box = readJson(watchFile, { seen: {} })
+        if (!box.seen || typeof box.seen !== 'object') box.seen = {}
+        for (const x of 私信) box.seen[x.键] = { ts: Date.now() }
+        const 条目 = Object.entries(box.seen)
+        if (条目.length > 500) {
+          const 留 = 条目.sort((a, b) => Number((b[1] && b[1].ts) || 0) - Number((a[1] && a[1].ts) || 0)).slice(0, 500)
+          box.seen = Object.fromEntries(留)
+        }
+        box.lastAt = Date.now()
+        writeJson(watchFile, box)
+      }
+      if (提醒.length) commitInbox(提醒.map((x) => x.原始))
+    } catch (e) { log('提醒：记账失败 ' + (e?.message ?? e)) }
+
+    log('提醒：递过去 ' + 全.length + ' 条（私信 ' + 私信.length + ' / @ 和回复 ' + 提醒.length + '）')
+  }
+
+  const watchTick = () => {
+    try {
+      refreshCfg()
+      if (!cfg.watchOn) return
+      const t = Date.now()
+      if (t < watchNextAt) return
+      watchNextAt = t + 提醒间隔毫秒()          // 先占位：上一跳没跑完也不会叠起来
+      if (watchBusy) return
+      watchBusy = true
+      Promise.resolve(watchOnce())
+        .catch((e) => {
+          watchNextAt = Date.now() + 提醒间隔毫秒() * 3     // 出错就退避，别一直撞
+          log('提醒：这一跳出错（已兜住）' + (e?.stack ?? e))
+        })
+        .finally(() => { watchBusy = false })
+    } catch (e) {
+      log('提醒定时器这一跳出错（已兜住）：' + (e?.stack ?? e))
+    }
+  }
+
+  try {
+    const wtimer = setInterval(watchTick, 15_000)
+    wtimer.unref?.()
+    ctx.effect(() => () => clearInterval(wtimer), 'bili-duty: 随叫随到定时器')
+  } catch (e) { log(`提醒定时器没起来：${e?.message ?? e}`) }
 
   /* ─────────────── HTTP（设置页用） ─────────────── */
 

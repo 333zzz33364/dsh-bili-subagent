@@ -1,4 +1,5 @@
 #      ⑩ `bili_dm_recent` 读私信（分享卡片 msg_type=7/8 要特殊解析；不做身份过滤，交给宿主）
+#      ⑪ `bili_dm_sessions` 看私信会话列表（谁发过、几个没读）—— 宿主先问未读、再只读有新消息的那几个
 #!/usr/bin/env python3
 """
 Bilibili MCP Server
@@ -1576,6 +1577,73 @@ async def bili_dm_recent(size: int = 20, talker_id: int = 0) -> str:
             "is_card": is_card,
         })
     return json.dumps({"ok": True, "me": me, "talker": talker, "count": len(out), "items": out},
+                      ensure_ascii=False)
+
+
+def _nick_of(it) -> str:
+    """会话项里能顺手拿到昵称就拿到（拿不到就空字符串，宿主会退回显示 UID）。"""
+    lm = it.get("last_msg") or {}
+    for ai in (lm.get("account_info"), it.get("account_info")):
+        if isinstance(ai, dict) and ai.get("name"):
+            return str(ai["name"])
+    return ""
+
+
+@tool()
+async def bili_dm_sessions(size: int = 10) -> str:
+    """看私信会话列表：谁给你发过、几个还没读。
+
+    宿主用它先找「谁有新私信」，再按 talker_id 去 `bili_dm_recent` 读内容 ——
+    比每次把所有会话的内容全拉一遍便宜得多。
+
+    Args:
+        size: 看前几个会话（1~20，默认 10）
+
+    Returns:
+        JSON：{ok, me, count, items:[{talker_uid, nick, unread, ts, last_from, last_text, is_card}]}
+    """
+    cred = get_cred()
+    me = int(getattr(cred, "dedeuserid", 0) or 0)
+    n = max(1, min(20, int(size or 10)))
+    try:
+        d = await session.get_sessions(cred, session_type=1)
+    except Exception as e:
+        return json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False)
+    lst = (d or {}).get("session_list") or []
+    items = []
+    for it in lst[:n]:
+        try:
+            uid = int(it.get("talker_id") or 0)
+        except Exception:
+            continue
+        if not uid or uid == me:
+            continue          # 自己跟自己那条（转发用）不算「有人找你」
+        lm = it.get("last_msg") or {}
+        mt = int(lm.get("msg_type") or 1)
+        try:
+            c = json.loads(lm.get("content") or "{}")
+        except Exception:
+            c = {}
+        is_card = mt in (7, 8)
+        text = "[分享视频] " + str(c.get("title") or c.get("headline") or "")[:80] if is_card \
+            else str(c.get("content") or c.get("text") or "")
+        nick = _nick_of(it)
+        if not nick:
+            try:
+                u = await user.get_user_info(uid)
+                nick = str((u or {}).get("name") or "")
+            except Exception:
+                nick = ""
+        items.append({
+            "talker_uid": uid,
+            "nick": nick,
+            "unread": int(it.get("unread_count") or 0),
+            "ts": int(lm.get("timestamp") or it.get("session_ts") or 0),
+            "last_from": int(lm.get("sender_uid") or 0),
+            "last_text": text[:150],
+            "is_card": is_card,
+        })
+    return json.dumps({"ok": True, "me": me, "count": len(items), "items": items},
                       ensure_ascii=False)
 
 
