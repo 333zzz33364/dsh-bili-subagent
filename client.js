@@ -162,6 +162,7 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
       const [watchPrompt, setWatchPrompt] = React.useState(null)   // 定点看一条的提示词
       const [hintPrompt, setHintPrompt] = React.useState(null)     // 投递提示（发给伙伴看的那段）
       const [triggerPrompt, setTriggerPrompt] = React.useState(null) // 自动刷触发语
+      const [commentPrompt, setCommentPrompt] = React.useState(null) // 评论怎么写（可改）
       const [cfgDefaults, setCfgDefaults] = React.useState(null)      // 服务端给的默认文案（「恢复默认」用）
       const [targetSession, setTargetSession] = React.useState(null) // 自动刷在哪个会话触发
       const [minViews, setMinViews] = React.useState(null)           // 门槛：最低播放量（0 = 不过滤）
@@ -209,6 +210,7 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
         if (cfg && watchPrompt === null) setWatchPrompt(cfg.watchPrompt || '')
         if (cfg && hintPrompt === null) setHintPrompt(cfg.hintPrompt || '')
         if (cfg && triggerPrompt === null) setTriggerPrompt(cfg.triggerPrompt || '')
+        if (cfg && commentPrompt === null) setCommentPrompt(cfg.commentPrompt || '')
         if (cfg && targetSession === null) setTargetSession(cfg.targetSession || '')
         if (cfg && minViews === null) setMinViews(String(cfg.minViews ?? 0))
         if (cfg && minAgeDays === null) setMinAgeDays(String(cfg.minAgeDays ?? 0))
@@ -760,6 +762,30 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
                 patch({ triggerPrompt: d }, '自动刷触发语')
               },
             }, '恢复默认'))),
+        /* ── 评论怎么写（可改规则） ── */
+        h('div', { 'data-bd-sec': '', 'data-bd-in': 'taste' },
+          h('div', { 'data-bd-h': '' }, '评论怎么写'),
+          h('div', { 'data-bd-note': '' },
+            '它发公开评论时照这份规则写。框里就是现在这份（默认已经填好）。'
+            + '可用占位符：{owner}=称呼、{mention}=要 @ 的人、{quota}=这一轮最多几条、{style}=这一轮的口吻（每次随机挑一种）。'),
+          h('div', { 'data-bd-row': '' },
+            h('button', {
+              'data-bd-btn': '',
+              onClick: () => {
+                const d = cfgDefaults && cfgDefaults.commentPrompt
+                if (!d) return
+                setCommentPrompt(d)
+                patch({ commentPrompt: d }, '评论提示')
+              },
+            }, '恢复默认'),
+            h('span', { 'data-bd-note': '' }, '改坏了点这个，就回到出厂那份')),
+          h('textarea', {
+            'data-bd-input': '', rows: 10,
+            value: commentPrompt ?? '',
+            placeholder: '（这里应该已经填好默认文案；空的话点「恢复默认」）',
+            onChange: (e) => setCommentPrompt(e.target.value),
+            onBlur: () => patch({ commentPrompt: String(commentPrompt || '') }, '评论提示'),
+          })),
         /* ── 一轮挑几条 ── */
         h('div', { 'data-bd-sec': '', 'data-bd-in': 'daily' },
           h('div', { 'data-bd-h': '' }, '一轮挑几条'),

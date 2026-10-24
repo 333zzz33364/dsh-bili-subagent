@@ -62,6 +62,41 @@ const WATCH_TMPL = '去看这一条视频：{bvid}\n\n'
 
 const TRIGGER_TMPL = '（到谷时啦，去 B 站刷一轮吧～想看什么方向你自己定，用 bili_scan 就行；刷完按设置，该发评论发评论、该发私信发私信。）'
 
+/**
+ * ⭐ 2026-10-24（主人提的）：**评论区提示也单独抽出来、可以自己改规则**。
+ *
+ * 起因：她连着几条公开评论全是同一个模子 ——
+ *   「"抄一句原话"，这条我/这三步，比我看的任何…都…@某某」
+ * 查下来不是模型笨，是原来的指令只写了「极短：只点一个最有意思的点/梗」——
+ *   要"点一个点"就得先引用，要"极短"最省字的就是比较级 ⇒ 每次都走同一条路。
+ *
+ * 这段就是「评论内容怎么写」的规则，**设置页能改**。
+ * 占位符：{owner}=主人称呼、{mention}=要 @ 的人、{quota}=这一轮最多几条、{style}=这一轮的口吻
+ * 下面这些「机制性」的话不进模板（工具名、楼中楼别手打 @）——
+ * 那些是必须照做的，写死了更省心。
+ */
+const COMMENT_TMPL = [
+  '评论一句话到两句，别排比、别列点。',
+  '',
+  '挑一个具体的点说就行，不用总结全文，也不用面面俱到。',
+  '不用非夸它，也别写成读后感 —— 像平时刷到视频随手留一句那种就对了。',
+  '',
+  '「比…更…」「值得记住」「干货满满」这类词太满了，一出现就像模板；上来先抄一句原话加引号也一样。',
+  '这一轮可以这么起头：{style}',
+  '最多 {quota} 条；末尾记得带「@{mention}」（新评论 B站 不会自己加）。',
+].join('\n')
+
+// 口吻轮盘：每次刷随机抽一种，避免每条都一个调门
+const COMMENT_STYLES = [
+  '像刚想到一件事，先说结论再补为啥',
+  '带点自嘲，顺手提个自己的糗事',
+  '只夸一处具体的，不多解释',
+  '反问一句，把话头留给别人',
+  '补个自己的例子（真事或假设都行）',
+  '只说半句，留个钩子',
+  '像跟熟人随口一提，不用力',
+]
+
 // ⭐ 投递提示的**默认模板**：设置页直接把这个当默认值填在框里（不是留空！）
 //    占位符：{owner} {mention} {commentQuota} {uid}
 //            {commentBlock} / {dmBlock} / {bothBlock}（这三段按设置自动填或留空）
@@ -124,6 +159,8 @@ export const Config = !z ? undefined : z.object({
   triggerPrompt: z.string().default(TRIGGER_TMPL).extra('volatile', true),
   /** ⭐ 定点看一条（@ 她 / 私信转发的）用的提示词，占位符 {bvid} {owner} */
   watchPrompt: z.string().default(WATCH_TMPL).extra('volatile', true),
+  /** ⭐ 评论怎么写（规则可自己改）——占位符 {owner} {mention} {quota} {style} */
+  commentPrompt: z.string().default(COMMENT_TMPL).extra('volatile', true),
   /** ⭐ 门槛：播放量低于这个数的直接不返回给子代理（0 = 不过滤） */
   minViews: z.natural().default(0).extra('volatile', true),
   /** ⭐ 门槛：发布不足这么多天的直接不返回给子代理（0 = 不过滤） */
@@ -228,6 +265,7 @@ export function apply(ctx, config) {
     hintPrompt: HINT_TMPL,
     triggerPrompt: TRIGGER_TMPL,
     watchPrompt: WATCH_TMPL,   // ⭐ 定点看一条（@ 她 / 私信转发的）用的提示词
+    commentPrompt: COMMENT_TMPL, // ⭐ 评论怎么写（可改；{owner} {mention} {quota} {style}）
     minViews: 0,      // 播放量低于这个数的不给子代理看（0 = 不过滤）
     minAgeDays: 0,    // 发布不足这么多天的不给子代理看（0 = 不过滤）
     // ⭐ 收到的 @ 和回复：每轮顺手看一眼，把内容**递给伙伴本人**，回不回她自己定
@@ -347,9 +385,10 @@ export function apply(ctx, config) {
       const venvPy = join(stateDir, '.venv', 'Scripts', 'python.exe')
       if (existsSync(venvPy)) out.pythonPath = venvPy
     }
-    // ⭐ 这两段提示词：存着空串也补成默认文案 —— 设置页里要「看得见默认」
+    // ⭐ 这几段提示词：存着空串也补成默认文案 —— 设置页里要「看得见默认」
     if (!String(out.hintPrompt || '').trim()) out.hintPrompt = HINT_TMPL
     if (!String(out.triggerPrompt || '').trim()) out.triggerPrompt = TRIGGER_TMPL
+    if (!String(out.commentPrompt || '').trim()) out.commentPrompt = COMMENT_TMPL
     return clampPatch(迁移老配置(out, user))
   }
   const cfg = loadCfg()
@@ -538,8 +577,16 @@ export function apply(ctx, config) {
     const commentQuota = Math.max(0, Number(cfg.commentPerRound ?? 1))
     if (commentOn) pendingComment = { at: Date.now() }   // 记账：这轮欠一条评论
     const dmOn = Boolean(cfg.dmMode !== 'off' && Number(cfg.dmUid) > 0)
-    const 评论块 = '· **评论区 @（公开！除了 ' + owner + '，别人也看得到）**：这是**发**评论——必须用 `bili_reply` 工具真发一条，**不是**用 `bili_comment` 去读评论（读评论是子代理已经干过的事，跟这一步无关）。**设置里已经开着，直接调 bili_reply 就行，不用传 force**。最多发 ' + commentQuota + ' 条，内容**极短**：只点一个最有意思的点/梗。别写长、别写私密的话（大家都能看到）。'
-      + String.fromCharCode(10) + '  · 发新评论的话，末尾记得带上「@' + cfg.mentionName + '」—— 新评论 B站 不会自己加，不写就没人看得见。'
+    // ⭐ 2026-10-24：评论「怎么写」交给可改的 commentPrompt；这里只保留**机制性**的话
+    //    （用哪个工具、楼中楼别手打 @）—— 那些是必须照做的，不该被改坏
+    const 口吻 = COMMENT_STYLES[Math.floor(Math.random() * COMMENT_STYLES.length)]
+    const 评论内容 = (String(cfg.commentPrompt || '').trim() || COMMENT_TMPL)
+      .split('{owner}').join(owner)
+      .split('{mention}').join(String(cfg.mentionName || ''))
+      .split('{quota}').join(String(commentQuota))
+      .split('{style}').join(口吻)
+    const 评论块 = '· **评论区 @（公开！除了 ' + owner + '，别人也看得到）**：这是**发**评论——必须用 `bili_reply` 工具真发一条，**不是**用 `bili_comment` 去读评论（读评论是子代理已经干过的事，跟这一步无关）。**设置里已经开着，直接调 bili_reply 就行，不用传 force**。'
+      + String.fromCharCode(10) + 评论内容
       + String.fromCharCode(10) + '  · 回别人的评论（楼中楼）就别手打 @ 了，B站 会自己加「回复 @某某」。'
     const 私信块 = '· **私信（只 ' + owner + ' 一个人看）**：用 bili_send_message 发**详细版**——开头先叫一声「' + owner + '，」再往下说；标题、BV号、视频讲了啥都可以细说，给 UID ' + Number(cfg.dmUid) + '。'
     const 都要块 = '⚠️ **这两件都要做，别只做一件**：先调 `bili_reply` 把评论 @ 发了，再调 `bili_send_message` 发私信（没发评论之前，私信会被拒）。'
