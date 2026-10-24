@@ -1321,9 +1321,15 @@ export function apply(ctx, config) {
     } catch (e) { return 0 }
   }
 
-  /** 拉一遍，挑出「该让她知道的」。**只挑不记账** —— 真递出去了才记（见 commitInbox） */
+  /**
+   * 拉一遍，挑出「该让她知道的」。**只挑不记账** —— 真递出去了才记（见 commitInbox）
+   * ⭐ 2026-10-24（她说的「点了没东西也要说一句，不然像按钮坏了」）：
+   *    顺手把「为什么没挑出来」也数出来。只回一句「没有」，她自己分不清是 B站 真没有、
+   *    还是被「同一条只提醒一次 / 每天额度」挡住了 —— 那种时候越看越像坏了。
+   */
   async function pickInbox() {
-    if (!cfg.inboxOn) return []
+    const 统计 = { 拉到: 0, 回过: 0, 提过: 0, 次数到: 0, 额度挡: 0, 名单外: 0 }
+    if (!cfg.inboxOn) return { items: [], 统计, 关了: true }
     const who = inboxTargets()   // null = 谁都理
     const box = readJson(inboxFile, { seen: {} })
     if (!box.seen || typeof box.seen !== 'object') box.seen = {}
@@ -1334,15 +1340,16 @@ export function apply(ctx, config) {
     let 别人余 = Math.max(0, 每天上限 - 今天回过别人几条())
     const 卡了 = []
     for (const it of await pullInbox()) {
-      if (who && !who.has(String(it.mid || ''))) continue    // 填了名单 = 只理这些人；留空 = 谁都理
+      统计.拉到++
+      if (who && !who.has(String(it.mid || ''))) { 统计.名单外++; continue }   // 填了名单 = 只理这些人；留空 = 谁都理
       const k = 收件键(it)
       const rec = box.seen[k] || { n: 0, replied: false }
-      if (rec.replied) continue                              // 回过了就不再提
-      if (cfg.inboxOnceOnly && rec.n >= 1) continue           // 「同一条只提醒一次」
-      if (rec.n >= Math.max(1, Number(cfg.inboxMaxRemind || 2))) continue
+      if (rec.replied) { 统计.回过++; continue }                            // 回过了就不再提
+      if (cfg.inboxOnceOnly && rec.n >= 1) { 统计.提过++; continue }          // 「同一条只提醒一次」
+      if (rec.n >= Math.max(1, Number(cfg.inboxMaxRemind || 2))) { 统计.次数到++; continue }
       const 是别人 = Number(it.mid || 0) !== 自己号
       if (是别人) {
-        if (别人余 <= 0) { 卡了.push(it); continue }          // 额度用完，这次不递
+        if (别人余 <= 0) { 卡了.push(it); 统计.额度挡++; continue }            // 额度用完，这次不递
         别人余--
       }
       out.push(it)
@@ -1351,7 +1358,7 @@ export function apply(ctx, config) {
       log('收件箱：今天回别人的额度用完了（' + 今天回过别人几条() + '/' + 每天上限 + '），'
         + 卡了.length + ' 条别人的先不递了')
     }
-    return out
+    return { items: out, 统计 }
   }
 
   /** 真的递出去了才记账 —— 没递成功就不算提醒过，下次还会提 */
@@ -1575,7 +1582,8 @@ export function apply(ctx, config) {
           let extra = ''
           let box = []
           try {
-            box = await pickInbox()
+            const 收件 = await pickInbox()
+            box = 收件.items
             if (box.length) {
               extra = renderInbox(box)
               log('收件箱：这一轮递过去 ' + box.length + ' 条（@ / 回复）')
@@ -2078,8 +2086,26 @@ export function apply(ctx, config) {
     // 「现在就去看一眼 @ 和回复」——手动版，不占自动刷的额度
     if (req.method === 'POST' && path === '/api/bili-duty/inbox') {
       try {
-        const box = await pickInbox()
-        if (!box.length) return sendJson(res, 200, { ok: true, count: 0, hint: '这会儿没有要转给你的 @ 或回复（或者都已经回过 / 提醒过上限了）' })
+        const 收件 = await pickInbox()
+        const box = 收件.items
+        const 统计 = 收件.统计
+        if (!box.length) {
+          // ⭐ 2026-10-24（她说的）：没东西也要**明说一句**，并且说清是被哪道闸挡的 ——
+          //    只回一句「没有」的时候，用户分不清是 B站 真没有，还是按钮坏了。
+          const 挡的 = []
+          if (统计.提过) 挡的.push(统计.提过 + ' 条已经提过一次（设置里「同一条只提醒一次」开着）')
+          if (统计.回过) 挡的.push(统计.回过 + ' 条你已经回过')
+          if (统计.次数到) 挡的.push(统计.次数到 + ' 条提醒次数到顶了')
+          if (统计.额度挡) 挡的.push(统计.额度挡 + ' 条撞上「一天最多回别人几条」')
+          if (统计.名单外) 挡的.push(统计.名单外 + ' 条不在「还要理谁」名单里')
+          const 话 = 收件.关了
+            ? '「收到的 @ 和回复」这个开关是关着的 —— 现在完全不看。要看得先把它打开。'
+            : (统计.拉到 === 0
+              ? 'B站 那边这会儿没有新的 @、回复或私信。'
+              : ('没有能递的：一共拉到 ' + 统计.拉到 + ' 条，' + 挡的.join('；') + '。'))
+          log('收件箱（手动）：' + 话)
+          return sendJson(res, 200, { ok: true, count: 0, stats: 统计, hint: 话 })
+        }
         const text = renderInbox(box)
         const sent = await triggerFeiyuScan('inbox', text, box)
         if (sent) commitInbox(box)
@@ -2104,7 +2130,8 @@ export function apply(ctx, config) {
       let extra = ''
       let box = []
       try {
-        box = await pickInbox()
+        const 收件 = await pickInbox()
+        box = 收件.items
         if (box.length) {
           extra = renderInbox(box)
           log('收件箱（手动那一轮）：递过去 ' + box.length + ' 条')
