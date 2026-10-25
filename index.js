@@ -1331,7 +1331,10 @@ export function apply(ctx, config) {
    *    顺手把「为什么没挑出来」也数出来。只回一句「没有」，她自己分不清是 B站 真没有、
    *    还是被「同一条只提醒一次 / 每天额度」挡住了 —— 那种时候越看越像坏了。
    */
-  async function pickInbox() {
+  async function pickInbox(选项 = {}) {
+    // ⭐ 2026-10-25（她定的）：手动点「看一眼」= 她亲自要的 —— 不被「同一条只提醒一次」、
+    //    「提醒次数到顶」、「每天最多回别人几条」这三道闸挡住；「回过了」「不在名单里」照旧跳过。
+    const 手动 = Boolean(选项 && 选项.手动)
     const 统计 = { 拉到: 0, 回过: 0, 提过: 0, 次数到: 0, 额度挡: 0, 名单外: 0 }
     if (!cfg.inboxOn) return { items: [], 统计, 关了: true }
     const who = inboxTargets()   // null = 谁都理
@@ -1349,10 +1352,10 @@ export function apply(ctx, config) {
       const k = 收件键(it)
       const rec = box.seen[k] || { n: 0, replied: false }
       if (rec.replied) { 统计.回过++; continue }                            // 回过了就不再提
-      if (cfg.inboxOnceOnly && rec.n >= 1) { 统计.提过++; continue }          // 「同一条只提醒一次」
-      if (rec.n >= Math.max(1, Number(cfg.inboxMaxRemind || 2))) { 统计.次数到++; continue }
+      if (!手动 && cfg.inboxOnceOnly && rec.n >= 1) { 统计.提过++; continue }   // 「同一条只提醒一次」
+      if (!手动 && rec.n >= Math.max(1, Number(cfg.inboxMaxRemind || 2))) { 统计.次数到++; continue }
       const 是别人 = Number(it.mid || 0) !== 自己号
-      if (是别人) {
+      if (是别人 && !手动) {
         if (别人余 <= 0) { 卡了.push(it); 统计.额度挡++; continue }            // 额度用完，这次不递
         别人余--
       }
@@ -2102,7 +2105,7 @@ export function apply(ctx, config) {
     // 「现在就去看一眼 @ 和回复」——手动版，不占自动刷的额度
     if (req.method === 'POST' && path === '/api/bili-duty/inbox') {
       try {
-        const 收件 = await pickInbox()
+        const 收件 = await pickInbox({ 手动: true })
         const box = 收件.items
         const 统计 = 收件.统计
         if (!box.length) {
