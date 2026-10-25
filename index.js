@@ -63,6 +63,20 @@ const WATCH_TMPL = '去看这一条视频：{bvid}\n\n'
 const TRIGGER_TMPL = '（到谷时啦，去 B 站刷一轮吧～想看什么方向你自己定，用 bili_scan 就行；刷完按设置，该发评论发评论、该发私信发私信。）'
 
 /**
+ * ⭐ 2026-10-26（主人要的）：**到点发动态派给谁、说什么**。
+ * 不绑当前对话 —— 插件到点把这段派给设置里选的那个会话，那边的伙伴自己读报告、写动态、回评论。
+ * 占位符：{owner}=称呼、{home}=插件家目录（报告就在 <home>/out/<日期>.md）。
+ */
+const DYNAMIC_TMPL = [
+  '到点了，把今天刷 B站 的东西写成一条公开动态发出去。',
+  '',
+  '1）先看今天刷到了什么：读 `{home}/out/<今天的日期>.md`，再加上这个会话里这一轮的内容，挑出 1–3 件真值得说的。',
+  '2）用 `bili_send_dynamic` 发出去：人话、具体、带 BV 号，300 字以内。别写成通稿、别排比、别用「干货满满」这类词；今天确实没有值得写的，就不发。',
+  '3）顺手去今天看过的视频评论区挑 1–2 条能接上话的评论，用 `bili_reply` 带 rpid 回一句：短、像随手接话，同一个人别连着回。B站 会自己加「回复 @某某」，正文里不要手打 @。',
+  '4）发完跟{owner}说一句：动态发了没、发了什么、回了谁的哪条评论。',
+].join(String.fromCharCode(10))
+
+/**
  * ⭐ 2026-10-24（主人提的）：**评论区提示也单独抽出来、可以自己改规则**。
  *
  * 起因：她连着几条公开评论全是同一个模子 ——
@@ -200,6 +214,14 @@ export const Config = !z ? undefined : z.object({
   dynamicPerDay: z.natural().default(3).extra('volatile', true),
   /** ⭐ 两条动态之间至少隔几分钟（1–720；范围由 clampPatch 钳） */
   dynamicGapMin: z.natural().default(10).extra('volatile', true),
+  /** ⭐ 到点自动发动态（默认关）：到点由插件把一句话派给指定会话，**不绑当前对话** */
+  dynamicAutoOn: z.boolean().default(false).extra('volatile', true),
+  /** ⭐ 到点时间 HH:mm（北京时间） */
+  dynamicTime: z.string().default('22:00').extra('volatile', true),
+  /** ⭐ 派给哪个会话；留空 = 跟「自动刷在哪个会话」同一个 */
+  dynamicSession: z.string().default('').extra('volatile', true),
+  /** ⭐ 派过去的那句话（占位符 {owner} {home}） */
+  dynamicPrompt: z.string().default(DYNAMIC_TMPL).extra('volatile', true),
 })
 
 /**
@@ -342,6 +364,11 @@ export function apply(ctx, config) {
     dynamicOn: false,
     dynamicPerDay: 3,     // 每天最多几条动态（1–10）
     dynamicGapMin: 10,    // 两条之间至少隔几分钟（1–720）
+    // ⭐ 到点自动发（2026-10-26）：插件到点派一件事给指定会话，不绑当前对话
+    dynamicAutoOn: false,
+    dynamicTime: '22:00',
+    dynamicSession: '',   // 留空 = 跟 targetSession 同一个
+    dynamicPrompt: DYNAMIC_TMPL,
   }
   const normalize = (src, base) => {
     const out = { ...base }
@@ -390,6 +417,13 @@ export function apply(ctx, config) {
       const n = Number(p.dynamicGapMin)
       p.dynamicGapMin = Number.isFinite(n) ? Math.max(1, Math.min(n, 720)) : 10
     }
+    if ('dynamicAutoOn' in p) p.dynamicAutoOn = Boolean(p.dynamicAutoOn)
+    if ('dynamicTime' in p) {
+      const t = String(p.dynamicTime || '').trim()
+      p.dynamicTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(t) ? t : '22:00'
+    }
+    if ('dynamicSession' in p) p.dynamicSession = String(p.dynamicSession || '').trim().slice(0, 200)
+    if ('dynamicPrompt' in p) p.dynamicPrompt = String(p.dynamicPrompt || '').slice(0, 4000)
     if ('watchInterval' in p) p.watchInterval = Math.max(60, Math.min(Number(p.watchInterval) || 120, 1800))
     if ('watchScope' in p) p.watchScope = ['valley', 'always'].includes(String(p.watchScope)) ? String(p.watchScope) : 'valley'
     return p
@@ -462,6 +496,7 @@ export function apply(ctx, config) {
     if (!String(out.hintPrompt || '').trim()) out.hintPrompt = HINT_TMPL
     if (!String(out.triggerPrompt || '').trim()) out.triggerPrompt = TRIGGER_TMPL
     if (!String(out.commentPrompt || '').trim()) out.commentPrompt = COMMENT_TMPL
+    if (!String(out.dynamicPrompt || '').trim()) out.dynamicPrompt = DYNAMIC_TMPL
     return clampPatch(迁移老配置(out, user))
   }
   const cfg = loadCfg()
@@ -1585,8 +1620,8 @@ export function apply(ctx, config) {
 
   /** 找「伙伴住的那个会话」并拿到 agent —— 自动刷、随叫随到共用这一份。
    *  找不到就返回 null，原因已经写进日志（不留一句看不懂的英文给使用者）。 */
-  const 取目标会话 = async (谁 = '自动刷') => {
-    let target = String(cfg.targetSession || '').trim()
+  const 取目标会话 = async (谁 = '自动刷', 指定 = '') => {
+    let target = String(指定 || cfg.targetSession || '').trim()
     if (!target) target = pickRecentSession()          // 没选 → 最近聊过的那个
     let agent = null
     if (!target) {
@@ -1604,7 +1639,71 @@ export function apply(ctx, config) {
     return { target, agent }
   }
 
-    const triggerFeiyuScan = async (why, extra, box) => {
+  // ⭐ 到点自动发动态（2026-10-26，主人要的）：**不绑当前对话** —— 到点插件把一句话派给
+  //    设置里选的那个会话（留空 = 跟自动刷同一个），那边的伙伴自己读报告、写动态、回评论。
+  //    三条约束：① 每天只派一次（state.json 的 dynTickDay 记账）② 错过超过 3 小时就不补
+  //    （免得半夜或第二天早上突然发）③ 跟刷站那套完全独立，不看谷时、不看 autoMode。
+  const 动态时间窗 = (now) => {
+    const t = String(cfg.dynamicTime || '').trim()
+    const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(t)
+    if (!m) return false
+    const target = new Date(now)
+    target.setHours(Number(m[1]), Number(m[2]), 0, 0)
+    const diff = now.getTime() - target.getTime()
+    return diff >= 0 && diff <= 3 * 60 * 60 * 1000
+  }
+
+  const triggerDynamicPost = async (why = 'auto') => {
+    const 递 = await 取目标会话('到点发动态', String(cfg.dynamicSession || '').trim())
+    if (!递) return false
+    const { target, agent } = 递
+    const ownerN = String(cfg.ownerName || '你')
+    const 文案 = (String(cfg.dynamicPrompt || '').trim() || DYNAMIC_TMPL)
+      .split('{owner}').join(ownerN)
+      .split('{home}').join(stateDir)
+    const msg = {
+      id: randomUUID(),
+      role: 'user',
+      content: [{ type: 'text', text: 文案 }],
+      source: { kind: 'bili-duty-dynamic' },
+    }
+    try {
+      await agent.followup(msg)
+      log('到点发动态：已派给会话 ' + target.slice(0, 20) + '…（' + why + '）')
+      return true
+    } catch (e) {
+      log('到点发动态：派活失败 ' + (e?.message ?? e))
+      return false
+    }
+  }
+
+  // 定时器每跳都会调它：先记账再派，派不出去就把记账退回，下一分钟还能重试
+  let 动态派活中 = false
+  const 动态那一跳 = async () => {
+    if (动态派活中) return
+    if (!cfg.dynamicAutoOn || !cfg.dynamicOn) return
+    const now = new Date()
+    const today = dayKey(now)
+    const st = readJson(dutyStateFile, {})
+    if (st.dynTickDay === today) return
+    if (!动态时间窗(now)) return
+    动态派活中 = true
+    try {
+      writeJson(dutyStateFile, { ...st, dynTickDay: today })
+      const ok = await triggerDynamicPost('auto')
+      if (!ok) {
+        const cur = readJson(dutyStateFile, {})
+        if (cur.dynTickDay === today) {
+          delete cur.dynTickDay
+          writeJson(dutyStateFile, cur)
+        }
+      }
+    } finally {
+      动态派活中 = false
+    }
+  }
+
+  const triggerFeiyuScan = async (why, extra, box) => {
     const 递 = await 取目标会话('自动刷')
     if (!递) return false
     const { target, agent } = 递
@@ -1663,6 +1762,8 @@ export function apply(ctx, config) {
   const tick = () => {
     try {
       refreshCfg()                    // ⭐ 定时器活得比设置页久：每一跳都重新读一遍配置
+      // ⭐ 到点发动态跟刷站那条路完全独立（不看谷时、不看 autoMode），所以放在下面「只手动」早退之前
+      Promise.resolve(动态那一跳()).catch((e) => log('到点发动态那一跳出错（已兜住）：' + (e?.message ?? e)))
       const 模式 = 自动模式()
       if (模式 === 'manual') return
       const now = new Date()
