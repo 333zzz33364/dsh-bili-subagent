@@ -155,6 +155,8 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
       const [perScan, setPerScan] = React.useState(null)
       const [dmUid, setDmUid] = React.useState(null)        // 私信收件人 UID（本地草稿）
       const [dmMode, setDmMode] = React.useState(null)      // 投递方式：off / only / both
+      const [dynamicPerDay, setDynamicPerDay] = React.useState(null)   // 每天最多发几条动态
+      const [dynamicGapMin, setDynamicGapMin] = React.useState(null)   // 两条动态隔几分钟
       const [subProvider, setSubProvider] = React.useState(null)   // 派子代理用的 provider
       const [subModel, setSubModel] = React.useState(null)         // 派子代理用的 model
       const [ownerName, setOwnerName] = React.useState(null)       // 称呼
@@ -923,7 +925,38 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
               onBlur: () => { const n = Math.max(0, Number(dmUid) || 0); setDmUid(n ? String(n) : ''); patch({ dmUid: n }, '私信收件人') },
             }),
             h('div', { 'data-bd-note': '' }, '私信内容 = 本轮每条的「标题 + 链接 + 一句话」，一轮合并成一条发（不受 150 字限制）'),
-            h('div', { 'data-bd-note': '' }, '⚠️ 建议先让这个号和收件人互关：B站 对「陌生人私信」会限流，还可能不弹提醒')) : null),
+            h('div', { 'data-bd-note': '' }, '⚠️ 建议先让这个号和收件人互关：B站 对「陌生人私信」会限流，还可能不弹提醒')) : null,
+
+          // ⭐ 发公开动态（2026-10-25 加的）：这是「在自己的主页对外说话」，比评论更显眼 ⇒
+          //    跟自动评论同一个态度，默认关；额度（每天几条 / 隔几分钟）这两项可以调，范围由插件钳。
+          h(ToggleRow, {
+            label: '允许发公开动态',
+            note: '默认关。开了之后它才能用 bili_send_dynamic 在你自己的 B站 主页发动态；'
+              + '额度按下面两项来，改了立刻生效。',
+            on: sw('dynamicOn'),
+            onChange: (v) => patch({ dynamicOn: v }, '允许发公开动态'),
+          }),
+          sw('dynamicOn') ? h('div', { 'data-bd-sub': '' },
+            h('div', { 'data-bd-row': '' },
+              h('div', { 'data-bd-grow': '' },
+                h('div', { 'data-bd-label': '' }, '每天最多发几条动态'),
+                h('div', { 'data-bd-note': '' }, '1–10；今天发过几条记在插件家目录的 state.json 里，跨会话也算')),
+              h('input', {
+                'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 1, max: 10,
+                value: dynamicPerDay ?? '',
+                onChange: (e) => setDynamicPerDay(e.target.value),
+                onBlur: () => { const n = Math.max(1, Math.min(Number(dynamicPerDay) || 3, 10)); setDynamicPerDay(String(n)); patch({ dynamicPerDay: n }, '每天动态条数') },
+              })),
+            h('div', { 'data-bd-row': '' },
+              h('div', { 'data-bd-grow': '' },
+                h('div', { 'data-bd-label': '' }, '两条动态之间至少隔几分钟'),
+                h('div', { 'data-bd-note': '' }, '1–720；刚发过一条就得再等这么久，防连发刷屏')),
+              h('input', {
+                'data-bd-input': '', 'data-bd-num': '', type: 'number', min: 1, max: 720,
+                value: dynamicGapMin ?? '',
+                onChange: (e) => setDynamicGapMin(e.target.value),
+                onBlur: () => { const n = Math.max(1, Math.min(Number(dynamicGapMin) || 10, 720)); setDynamicGapMin(String(n)); patch({ dynamicGapMin: n }, '动态间隔') },
+              }))) : null),
 
         /* ── 日报写多细 ── */
         h('div', { 'data-bd-sec': '', 'data-bd-in': 'daily' },
