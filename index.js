@@ -194,6 +194,8 @@ export const Config = !z ? undefined : z.object({
   tripleCoin: z.natural().default(1).extra('volatile', true),
   /** 每条视频写一份笔记 */
   notesOn: z.boolean().default(true).extra('volatile', true),
+  /** ⭐ 允许发公开动态（拿自己号对外发言，**默认关**） */
+  dynamicOn: z.boolean().default(false).extra('volatile', true),
 })
 
 /**
@@ -331,6 +333,9 @@ export function apply(ctx, config) {
     tripleMode: 'off',
     tripleCoin: 1,        // 投币枚数（1 或 2）
     notesOn: true,        // 每条视频写一份笔记（reports/<BV>-<日期>.md）
+    // ⭐ 发公开动态（2026-10-25 主人要的）：拿自己号在主页对外说话，**默认关** ——
+    //    跟 autoComment 同一个道理，谁要谁自己开；没开时只能靠 force 单次放行
+    dynamicOn: false,
   }
   const normalize = (src, base) => {
     const out = { ...base }
@@ -370,6 +375,7 @@ export function apply(ctx, config) {
     if ('tripleMode' in p) p.tripleMode = ['off','like','coin','fav','like_fav','triple'].includes(String(p.tripleMode)) ? String(p.tripleMode) : 'off'
     if ('tripleCoin' in p) p.tripleCoin = Math.max(1, Math.min(Number(p.tripleCoin) || 1, 2))
     if ('notesOn' in p) p.notesOn = Boolean(p.notesOn)
+    if ('dynamicOn' in p) p.dynamicOn = Boolean(p.dynamicOn)
     if ('watchInterval' in p) p.watchInterval = Math.max(60, Math.min(Number(p.watchInterval) || 120, 1800))
     if ('watchScope' in p) p.watchScope = ['valley', 'always'].includes(String(p.watchScope)) ? String(p.watchScope) : 'valley'
     return p
@@ -960,6 +966,65 @@ export function apply(ctx, config) {
     },
   })
 
+  /* ⭐ 发公开动态（2026-10-25 主人要的）：拿**自己号在主页对外说话**，比评论更显眼 ⇒
+   *    默认关，设置里「允许发公开动态」开了才发；另外两道硬闸（一天 3 条 / 间隔 10 分钟）
+   *    是防模型一激动连着刷屏 —— 这两道**不认 force**，跟私信那道"欠评论"的闸同一个道理。 */
+  tool({
+    name: 'bili_send_dynamic',
+    description: '在**自己的 B站 主页**发一条公开动态（所有人都刷得到，不只是你的粉丝）。\n'
+      + '拿真刷到的东西 + 你自己的看法写：具体、有 BV 号、像人说的话，别写成公告或通稿。\n'
+      + '⚠️ 正文带上 BV 号，别人才找得到原视频。\n'
+      + '🔴 安全闸：设置里「允许发公开动态」开着才能发；没开时**本人当场让你发**才传 force: true。\n'
+      + '一天最多 3 条、两条之间至少隔 10 分钟（这两道闸 force 也绕不过去）。',
+    parameters: {
+      text: { type: 'string', description: '动态正文（人话；可带 BV 号、[doge] 这类表情）' },
+      images: { type: 'string', description: '可选：配图，本地路径或 http(s) 链接，多个用换行/逗号分隔，最多 9 张' },
+      topicId: { type: 'number', description: '可选：话题 id（0 / 不填 = 不带话题）' },
+      scheduleTime: { type: 'number', description: '可选：B站 定时发布的 Unix 时间戳（秒）；0 / 不填 = 立刻发' },
+      force: { type: 'boolean', description: '本人当场让你发的，传 true 越过「允许发公开动态」那道闸' },
+    },
+    async execute(args) {
+      refreshCfg()
+      if (!cfg.dynamicOn && !args.force) {
+        return {
+          ok: false,
+          blocked: true,
+          hint: '发公开动态得先开「允许发公开动态」（bili_config 传 {"dynamicOn":true}，或在 DSH 的插件设置里打开）。或者本人当场让你发时传 force: true。',
+        }
+      }
+      const text = String(args.text ?? '').trim()
+      if (!text) return { ok: false, blocked: true, hint: '正文不能空 —— 动态至少得有一句话。' }
+
+      // 硬闸：一天 3 条 + 两条间隔 10 分钟（记在 state.json，跨轮次/跨会话都算数）
+      const st = readJson(dutyStateFile, {})
+      const today = dayKey()
+      const 今天几条 = st.dynDay === today ? Number(st.dynCount || 0) : 0
+      const 上一条在 = Number(st.dynAt || 0)
+      if (今天几条 >= 3) return { ok: false, blocked: true, hint: '今天已经发过 3 条动态了 —— 够了，明天再说。' }
+      const 刚发过 = 上一条在 && Date.now() - 上一条在 < 10 * 60 * 1000
+      if (刚发过) return { ok: false, blocked: true, hint: '刚发过一条，至少隔 10 分钟 —— 别连着刷屏。' }
+
+      const imgs = String(args.images ?? '')
+        .split(/[\n,，;；]+/).map((s) => s.trim()).filter(Boolean).slice(0, 9)
+      log(`发动态：${text.slice(0, 40)}${imgs.length ? `（${imgs.length} 张图）` : ''}`)
+      const r = await call('bili_send_dynamic', {
+        text,
+        images: imgs,
+        topic_id: Math.max(0, Number(args.topicId) || 0),
+        schedule_time: Math.max(0, Number(args.scheduleTime) || 0),
+      })
+      // 发成了才记账；没发成（风控/没权限）不占当天的额度。
+      // ⚠️ 只写 dyn* 三个键，**别碰 `day`** —— 那是刷站额度用的，碰了会把昨天的 picked 算成今天的。
+      let 成功 = false
+      try { 成功 = Boolean((typeof r === 'string' ? JSON.parse(r) : r)?.success) } catch { 成功 = false }
+      if (成功) {
+        const cur = readJson(dutyStateFile, {})
+        writeJson(dutyStateFile, { ...cur, dynDay: today, dynCount: 今天几条 + 1, dynAt: Date.now() })
+      }
+      return r
+    },
+  })
+
   tool({
     name: 'bili_status',
     description: '看它今天的状态：跑了没跑、挑了几条、额度剩多少、报告在哪、登录过没有、下次窗口什么时候开。',
@@ -1041,7 +1106,8 @@ export function apply(ctx, config) {
       + '私信投递：`{"dmMode":"only","dmUid":12345678}`（dmMode = off / only / both）；'
       + '看 @ 和回复：`{"inboxOn":true,"inboxOnceOnly":true,"inboxMaxRemind":2}`；'
       + '有人找我就马上告诉你：`{"watchOn":true,"watchDm":true,"watchAt":true,"watchInterval":120,"watchScope":"valley"}`'
-      + '（watchScope = valley 只在谷时 / always 全天；watchInterval 60–1800 秒）。',
+      + '（watchScope = valley 只在谷时 / always 全天；watchInterval 60–1800 秒）；'
+      + '允许发公开动态：`{"dynamicOn":true}`（默认关）。',
     parameters: { patch: { type: 'object', additionalProperties: true, description: '要改的字段（可省）' } },
     async execute(args) {
       let host = null
