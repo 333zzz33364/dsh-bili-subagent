@@ -75,6 +75,10 @@ window.__ModuleLoader__.load({
 [data-bd-num]{width:88px;text-align:center;}
 /* ⭐ 下拉框别去吃 width:100% —— 否则同一行里「说明文字」那一栏被挤成一条竖线（2026-10-22 主人指出） */
 select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
+/* ⭐ 同理：行里的普通输入框（type=time 这类，不是 data-bd-num）也别 width:100%
+ *    —— 否则它按整行宽度算 flex-basis，把 data-bd-grow 挤成 0 宽，说明文字变成一字一行的竖排
+ *    （2026-10-26 主人截图指出「几点发」那行） */
+[data-bd-row]>input[data-bd-input]:not([data-bd-num]){width:auto;min-width:140px;flex:0 0 auto;}
 [data-bd-btn]{padding:7px 12px;border-radius:8px;font-size:12px;cursor:pointer;font-family:inherit;
   border:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,.16));
   background:var(--dsw-alias-bg-overlay,rgba(128,128,128,.14));color:inherit;}
@@ -205,6 +209,11 @@ select[data-bd-input]{width:auto;min-width:150px;max-width:230px;flex:0 0 auto;}
         if (cfg && mention === null) setMention(cfg.mentionName || '')
         if (cfg && dmUid === null) setDmUid(cfg.dmUid ? String(cfg.dmUid) : '')
         if (cfg && dmMode === null) setDmMode(cfg.dmMode || 'off')
+        // ⭐ 动态额度 / 时间这几个也必须从 cfg 灌进草稿，否则第一次进设置页永远是空框（2026-10-26 主人截图）
+        if (cfg && dynamicPerDay === null) setDynamicPerDay(String(cfg.dynamicPerDay ?? 3))
+        if (cfg && dynamicGapMin === null) setDynamicGapMin(String(cfg.dynamicGapMin ?? 10))
+        if (cfg && dynamicTime === null) setDynamicTime(cfg.dynamicTime || '22:00')
+        if (cfg && dynamicSession === null) setDynamicSession(cfg.dynamicSession || '')
         if (cfg && subProvider === null) setSubProvider(cfg.subProvider || '')
         if (cfg && subModel === null) setSubModel(cfg.subModel || '')
         if (cfg && ownerName === null) setOwnerName(cfg.ownerName || '你')
